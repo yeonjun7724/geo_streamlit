@@ -81,9 +81,9 @@ HANAM_APARTMENTS = {
 }
 
 SCENARIO_STYLES = {
-    "일반 상황": {"route_color": "blue", "icon_color": "blue", "profile": "driving"},
-    "긴급 상황 (소방)": {"route_color": "red", "icon_color": "red", "profile": "driving"},
-    "긴급 상황 (구급)": {"route_color": "green", "icon_color": "green", "profile": "driving"},
+    "일반 상황": {"route_color": "blue", "icon_color": "blue"},
+    "긴급 상황 (소방)": {"route_color": "red", "icon_color": "red"},
+    "긴급 상황 (구급)": {"route_color": "green", "icon_color": "green"},
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -91,9 +91,9 @@ SCENARIO_STYLES = {
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
-    """Mapbox Directions API → 경로 좌표([[lat,lon],...]), 거리(km), 시간(분)"""
+    """Mapbox Directions API → (경로좌표, 거리(km), 시간(분), 마지막노드(lat,lon))"""
     if not MAPBOX_TOKEN:
-        return [], None, None
+        return [], None, None, None
     coords = ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
     url = f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}"
     params = {"geometries": "geojson", "overview": "full", "access_token": MAPBOX_TOKEN}
@@ -102,15 +102,16 @@ def mapbox_route(points_latlon, profile="driving"):
         r.raise_for_status()
         data = r.json()
         if not data.get("routes"):
-            return [], None, None
+            return [], None, None, None
         route = data["routes"][0]
         line = route["geometry"]["coordinates"]  # [[lon,lat],...]
         coords_latlon = [[lat, lon] for lon, lat in line]
+        end_latlon = coords_latlon[-1] if coords_latlon else None
         distance_km = route.get("distance", 0) / 1000.0
         duration_min = route.get("duration", 0) / 60.0
-        return coords_latlon, distance_km, duration_min
+        return coords_latlon, distance_km, duration_min, end_latlon
     except Exception:
-        return [], None, None
+        return [], None, None, None
 
 
 def add_mapbox_tile(m: folium.Map, style="mapbox/streets-v12"):
@@ -140,98 +141,127 @@ def pick_destination(apt: dict, destination_type: str):
     return apt["entrance"], "아파트 정문(대체)"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Sidebar (간소화: 선택만 남김)
+# Sidebar (선택만 유지)
 # ──────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     apartment_complex = st.selectbox("아파트 단지", list(HANAM_APARTMENTS.keys()), index=0)
     destination_type = st.selectbox("목적지", ["동 출입구", "소화전", "관리사무소"], index=0)
-    scenario = st.radio("시나리오", list(SCENARIO_STYLES.keys()), index=0)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Main Title
 # ──────────────────────────────────────────────────────────────────────────────
 st.title("🏢 하남시 MAT 기반 아파트 네비게이션")
-st.caption("Mapbox Directions API를 이용해 AS-IS(정문) vs TO-BE(단지 내부 목적지) 실측 거리·시간을 산출합니다.")
+st.caption("AS-IS: 정문까지 차량 + 내부 도보 / TO-BE: 건물 전면까지 차량 + 잔여 도보 (Mapbox 기준)")
 
-as_is_tab, effect_tab, sim_tab = st.tabs(["🔄 AS IS vs TO BE", "📊 효과 분석", "🗺️ 단지별 지도"])
+as_is_tab, effect_tab, map_tab = st.tabs(["🔄 AS IS vs TO BE", "📊 효과 분석", "🗺️ 단지별 지도"])
 
 selected = HANAM_APARTMENTS[apartment_complex]
-style = SCENARIO_STYLES[scenario]
 origin = selected["external_origin"]
 
 dest_point, dest_label = pick_destination(selected, destination_type)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tab 1: AS-IS vs TO-BE (실데이터 기반 산출)
+# Tab 1: 분해 계산 (차량+도보)
 # ──────────────────────────────────────────────────────────────────────────────
 with as_is_tab:
     left, right = st.columns(2)
 
-    # AS-IS: 외부 기준점 → 정문
-    as_is_coords, as_is_km, as_is_min = mapbox_route([origin, selected["entrance"]], profile=style["profile"])    
-    # TO-BE: 외부 기준점 → 정문 → 내부 목적지
-    to_be_coords, to_be_km, to_be_min = mapbox_route([origin, selected["entrance"], dest_point], profile=style["profile"]) 
+    # AS-IS
+    drv1_coords, drv1_km, drv1_min, drv1_end = mapbox_route([origin, selected["entrance"]], profile="driving")
+    walk1_coords, walk1_km, walk1_min, _ = mapbox_route([selected["entrance"], dest_point], profile="walking")
+
+    # TO-BE
+    drv2_coords, drv2_km, drv2_min, drv2_end = mapbox_route([origin, dest_point], profile="driving")
+    # 차량이 진입할 수 없는 내부 구간은 잔여 도보로 산정 (운전 경로의 최종 노드 → 정확 목적지)
+    walk2_start = drv2_end if drv2_end else dest_point
+    walk2_coords, walk2_km, walk2_min, _ = mapbox_route([walk2_start, dest_point], profile="walking")
 
     with left:
-        st.markdown("#### ❌ AS IS — 정문까지")
+        st.markdown("#### ❌ AS IS — 정문까지 차량 + 내부 도보")
         m1 = folium.Map(location=selected["center"], zoom_start=17)
         add_mapbox_tile(m1)
+        # markers
         folium.Marker(origin, popup="외부 기준점", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
-        folium.Marker(selected["entrance"], popup="아파트 정문", icon=folium.Icon(color="red", icon="stop")).add_to(m1)
-        if as_is_coords:
-            folium.PolyLine(as_is_coords, color=style["route_color"], weight=4, opacity=0.9, popup="AS-IS 경로").add_to(m1)
-        st_folium(m1, use_container_width=True, height=380)
+        folium.Marker(selected["entrance"], popup="정문", icon=folium.Icon(color="red", icon="flag")).add_to(m1)
+        folium.Marker(dest_point, popup=dest_label, icon=folium.Icon(color="blue", icon="home")).add_to(m1)
+        # lines
+        if drv1_coords:
+            folium.PolyLine(drv1_coords, color="blue", weight=4, opacity=0.9, popup="차량(AS-IS)").add_to(m1)
+        if walk1_coords:
+            folium.PolyLine(walk1_coords, color="green", weight=4, opacity=0.9, popup="도보(AS-IS)", dash_array="5,7").add_to(m1)
+        st_folium(m1, use_container_width=True, height=400)
+
+        if drv1_min is not None and walk1_min is not None:
+            total1 = (drv1_min or 0) + (walk1_min or 0)
+            st.metric("총 시간(분)", f"{total1:.2f}")
+            st.caption(f"차량 {drv1_min:.2f}분  •  도보 {walk1_min:.2f}분  •  거리 {((drv1_km or 0)+(walk1_km or 0)):.2f}km")
 
     with right:
-        st.markdown("#### ✅ TO BE — 단지 내부 목적지까지")
+        st.markdown("#### ✅ TO BE — 건물 전면까지 차량 + 잔여 도보")
         m2 = folium.Map(location=selected["center"], zoom_start=17)
         add_mapbox_tile(m2)
         folium.Marker(origin, popup="외부 기준점", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
-        folium.Marker(selected["entrance"], popup="정문", icon=folium.Icon(color="orange", icon="flag")).add_to(m2)
-        folium.Marker(dest_point, popup=dest_label, icon=folium.Icon(color=style["icon_color"], icon="home")).add_to(m2)
-        if to_be_coords:
-            folium.PolyLine(to_be_coords, color=style["route_color"], weight=5, opacity=0.95, popup="TO-BE 경로").add_to(m2)
-        st_folium(m2, use_container_width=True, height=380)
+        folium.Marker(dest_point, popup=dest_label, icon=folium.Icon(color="green", icon="home")).add_to(m2)
+        if drv2_coords:
+            folium.PolyLine(drv2_coords, color="blue", weight=5, opacity=0.95, popup="차량(TO-BE)").add_to(m2)
+        if walk2_coords and (walk2_km or 0) > 0:
+            folium.PolyLine(walk2_coords, color="green", weight=4, opacity=0.9, popup="도보(TO-BE)", dash_array="5,7").add_to(m2)
+        st_folium(m2, use_container_width=True, height=400)
+
+        if drv2_min is not None and walk2_min is not None:
+            total2 = (drv2_min or 0) + (walk2_min or 0)
+            st.metric("총 시간(분)", f"{total2:.2f}")
+            st.caption(f"차량 {drv2_min:.2f}분  •  도보 {walk2_min:.2f}분  •  거리 {((drv2_km or 0)+(walk2_km or 0)):.2f}km")
 
     st.markdown("---")
-    if as_is_min is not None and to_be_min is not None:
-        improv = (as_is_min - to_be_min) / as_is_min * 100 if as_is_min > 0 else 0
-        df = pd.DataFrame({
-            "구분": ["AS-IS", "TO-BE"],
-            "거리(km)": [round(as_is_km, 2), round(to_be_km, 2)],
-            "시간(분)": [round(as_is_min, 2), round(to_be_min, 2)],
-        })
-        st.dataframe(df, use_container_width=True)
-        st.success(f"시간 단축률: **{improv:.1f}%**  |  AS-IS {as_is_min:.2f}분 → TO-BE {to_be_min:.2f}분")
+    if None not in (drv1_min, walk1_min, drv2_min, walk2_min):
+        total1 = (drv1_min or 0) + (walk1_min or 0)
+        total2 = (drv2_min or 0) + (walk2_min or 0)
+        walk_improv = ((walk1_min or 0) - (walk2_min or 0))
+        total_improv_pct = (total1 - total2) / total1 * 100 if total1 > 0 else 0
+        st.success(
+            f"도보 시간 단축: **{walk_improv:.2f}분**  |  총 소요시간: {total1:.2f}분 → {total2:.2f}분 (**{total_improv_pct:.1f}% ↓**)"
+        )
     else:
-        st.error("경로를 계산할 수 없습니다. MAPBOX_TOKEN 또는 네트워크를 확인하세요.")
+        st.error("경로 계산에 실패했습니다. 토큰 또는 네트워크 상태를 확인하세요.")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tab 2: 효과 분석 (단지별 실측 비교)
+# Tab 2: 효과 분석 (단지별 차량/도보 분해)
 # ──────────────────────────────────────────────────────────────────────────────
 with effect_tab:
     rows = []
     for name, apt in HANAM_APARTMENTS.items():
         dest_pt, _ = pick_destination(apt, destination_type)
-        c1, d1, t1 = mapbox_route([apt["external_origin"], apt["entrance"]], profile=style["profile"])  # AS-IS
-        c2, d2, t2 = mapbox_route([apt["external_origin"], apt["entrance"], dest_pt], profile=style["profile"])  # TO-BE
-        if d1 is None or t1 is None or d2 is None or t2 is None:
+        # AS-IS
+        _, ddrv1, tdrv1, _ = mapbox_route([apt["external_origin"], apt["entrance"]], profile="driving")
+        _, dwalk1, twalk1, _ = mapbox_route([apt["entrance"], dest_pt], profile="walking")
+        # TO-BE
+        _, ddrv2, tdrv2, end2 = mapbox_route([apt["external_origin"], dest_pt], profile="driving")
+        start_walk2 = end2 if end2 else dest_pt
+        _, dwalk2, twalk2, _ = mapbox_route([start_walk2, dest_pt], profile="walking")
+
+        if None in (tdrv1, twalk1, tdrv2, twalk2):
             continue
+        total1 = (tdrv1 or 0) + (twalk1 or 0)
+        total2 = (tdrv2 or 0) + (twalk2 or 0)
         rows.append({
             "아파트": name,
-            "AS-IS 시간(분)": round(t1, 2),
-            "TO-BE 시간(분)": round(t2, 2),
-            "시간 단축률(%)": round((t1 - t2) / t1 * 100, 1) if t1 > 0 else 0,
-            "AS-IS 거리(km)": round(d1, 2),
-            "TO-BE 거리(km)": round(d2, 2),
+            "AS-IS 차량(분)": round(tdrv1, 2),
+            "AS-IS 도보(분)": round(twalk1, 2),
+            "TO-BE 차량(분)": round(tdrv2, 2),
+            "TO-BE 도보(분)": round(twalk2, 2),
+            "총시간 AS-IS(분)": round(total1, 2),
+            "총시간 TO-BE(분)": round(total2, 2),
+            "총시간 개선률(%)": round((total1 - total2) / total1 * 100, 1) if total1 > 0 else 0,
+            "도보 절감(분)": round((twalk1 - twalk2), 2),
         })
 
     if rows:
         result_df = pd.DataFrame(rows)
         st.dataframe(result_df, use_container_width=True)
-        fig = px.bar(result_df, x="아파트", y=["AS-IS 시간(분)", "TO-BE 시간(분)"], barmode="group", title="단지별 평균 도달시간(분)")
+        fig = px.bar(result_df, x="아파트", y=["AS-IS 도보(분)", "TO-BE 도보(분)"], barmode="group", title="단지별 도보시간 비교")
         st.plotly_chart(fig, use_container_width=True)
-        fig2 = px.bar(result_df, x="아파트", y="시간 단축률(%)", title="단지별 시간 단축률(%)")
+        fig2 = px.bar(result_df, x="아파트", y="총시간 개선률(%)", title="단지별 총시간 개선률")
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.error("분석할 경로 데이터가 없습니다.")
@@ -239,7 +269,7 @@ with effect_tab:
 # ──────────────────────────────────────────────────────────────────────────────
 # Tab 3: 단지별 지도 (실경로 시각화)
 # ──────────────────────────────────────────────────────────────────────────────
-with sim_tab:
+with map_tab:
     m_total = folium.Map(location=[37.5539, 127.1650], zoom_start=14)
     add_mapbox_tile(m_total)
 
@@ -248,9 +278,15 @@ with sim_tab:
         color = colors[i % len(colors)]
         folium.Marker(location=apt["center"], popup=f"{apt_name}", icon=folium.Icon(color=color, icon="home")).add_to(m_total)
         dest_pt, _ = pick_destination(apt, destination_type)
-        coords, _, _ = mapbox_route([apt["external_origin"], apt["entrance"], dest_pt], profile="driving")
-        if coords:
-            folium.PolyLine(locations=coords, color=color, weight=3, opacity=0.8, popup=f"{apt_name} 경로").add_to(m_total)
+        # 차량 경로(TO-BE)
+        drv_coords, _, _, drv_end = mapbox_route([apt["external_origin"], dest_pt], profile="driving")
+        if drv_coords:
+            folium.PolyLine(locations=drv_coords, color=color, weight=3, opacity=0.85, popup=f"{apt_name} 차량경로").add_to(m_total)
+        # 잔여 도보
+        walk_start = drv_end if drv_end else dest_pt
+        walk_coords, _, _, _ = mapbox_route([walk_start, dest_pt], profile="walking")
+        if walk_coords:
+            folium.PolyLine(locations=walk_coords, color="green", weight=3, opacity=0.9, dash_array="5,7", popup=f"{apt_name} 도보").add_to(m_total)
 
     st_folium(m_total, use_container_width=True, height=520)
 
@@ -258,4 +294,4 @@ with sim_tab:
 # Footer
 # ──────────────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption(f"업데이트: {datetime.now().strftime('%Y-%m-%d')} | 데이터 소스: Mapbox Directions API")
+st.caption(f"업데이트: {datetime.now().strftime('%Y-%m-%d')} | 데이터 소스: Mapbox Directions API (driving + walking)")
