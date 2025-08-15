@@ -355,12 +355,13 @@ saved_people = int(annual_cases * survival_increase_rate)
 
 st.markdown(
     f"개선된 경로로 평균 이동 시간이 "
-    f"<span style='color:var(--blue)'>{improvement_min:.2f}분 단축</span>되었다. "
-    f"골든타임 <span style='color:var(--blue)'>{golden_time:.1f}분 대비 단축 비율은 **{(time_ratio*100):.1f}%**</span>이다. "
-    f"1분 단축당 생존율 개선을 <span style='color:var(--blue)'>{survival_increase_rate*100:.1f}%p</span>로 보았을 때, "
-    f"연간 출동 <span style='color:var(--blue)'>{annual_cases:,}건 기준으로 추가 생존 가능 인원은 약 {saved_people:,}명으로 추정</span>된다.",
+    f"<span style='color:var(--blue)'><strong>{improvement_min:.2f}분 단축</strong></span>되었다. "
+    f"골든타임 <span style='color:var(--blue)'><strong>{golden_time:.1f}분 대비 단축 비율은 {(time_ratio*100):.1f}%</strong></span>이다. "
+    f"1분 단축당 생존율 개선을 <span style='color:var(--blue)'><strong>{survival_increase_rate*100:.1f}%p</strong></span>로 보았을 때, "
+    f"연간 출동 <span style='color:var(--blue)'><strong>{annual_cases:,}건 기준으로 추가 생존 가능 인원은 약 {saved_people:,}명으로 추정</strong></span>된다.",
     unsafe_allow_html=True
 )
+
 
 
 
