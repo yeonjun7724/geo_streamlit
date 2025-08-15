@@ -7,7 +7,7 @@ import requests
 from folium.plugins import AntPath
 
 # ── 페이지 기본 설정 ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="하남시 MAT(벡터증축변환) 기반 아파트 확장 네비게이션", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="하남시 벡터 증축 변환(MAT) 기반 아파트 경로안내 서비스", page_icon="🏢", layout="wide")
 
 # ── 전역 스타일 (카드X, 정렬/크기 조정) ──────────────────────────────────────────
 st.markdown("""
@@ -147,7 +147,7 @@ def add_legend(m: folium.Map):
     m.get_root().html.add_child(folium.Element(legend_html))
 
 # ── 제목 ───────────────────────────────────────────────────────────────────────
-st.markdown('<div class="app-title">🏢 하남시 MAT(벡터증축변환) 기반 아파트 확장 네비게이션</div>', unsafe_allow_html=True)
+st.markdown('<div class="app-title">🏢 하남시 벡터 증축 변환(MAT) 기반 아파트 경로안내 서비스</div>', unsafe_allow_html=True)
 
 # ── 컨트롤: 두 칼럼 모두 화면폭 50%씩 꽉 채우기 ──────────────────────────────────
 c1, c2 = st.columns([1, 1])
@@ -196,12 +196,12 @@ map_height = 640
 left, right = st.columns(2)
 
 with left:
-    st.markdown("#### AS-IS — 정문까지 차량 + 잔여 도보")
+    st.markdown("#### AS-IS — 정문에서 차량 하차 + 잔여 도보")
     m1 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m1, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
     folium.Marker(apt_gate, popup="정문", icon=folium.Icon(color="red", icon="flag")).add_to(m1)
-    folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m1)
+    folium.Marker(apt_front, popup="아파트 동 앞", icon=folium.Icon(color="green", icon="home")).add_to(m1)
     if drv1_coords:
         AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
     if walk1_coords:
@@ -210,7 +210,7 @@ with left:
     st_folium(m1, use_container_width=True, height=map_height)
 
 with right:
-    st.markdown("#### TO-BE — 아파트 앞까지 차량")
+    st.markdown("#### TO-BE — 아파트 동 앞에서 하차")
     m2 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m2, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
@@ -242,6 +242,7 @@ st.markdown(
     f"1분 단축당 생존율 개선을 **{survival_increase_rate*100:.1f}%p**로 보았을 때, "
     f"연간 출동 **{annual_cases:,}건** 기준으로 추가 생존 가능 인원은 약 **{saved_people:,}명**으로 추정된다."
 )
+
 
 
 
