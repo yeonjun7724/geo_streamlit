@@ -1,12 +1,5 @@
 streamlit
-geopandas
-shapely
 folium
-requests
-matplotlib
-seaborn
-pyproj
-fiona
+streamlit-folium
 pandas
-numpy
-
+plotly
