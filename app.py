@@ -4,21 +4,20 @@ import folium
 from streamlit_folium import st_folium
 import pandas as pd
 import requests
-from datetime import datetime
 from folium.plugins import AntPath
 
 # ── 페이지 기본 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="하남시 MAT 기반 아파트 네비게이션", page_icon="🏢", layout="wide")
 
-# ── 전역 스타일 (카드 X, 미니멀/정렬만) ───────────────────────────────────────────
+# ── 전역 스타일 (깔끔 정렬, 카드X) ───────────────────────────────────────────────
 st.markdown("""
 <style>
-:root { --muted:#6b7280; --text:#111827; }
+:root { --muted:#6B7280; --text:#111827; }
 html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.6rem !important; }
 
-/* 전체 레이아웃: 화면을 넓게 쓰되 과도하게 길지 않게 */
+/* 전체 레이아웃 */
 .block-container {
     max-width: 1600px;
     padding-left: 1.5rem;
@@ -26,40 +25,33 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
     margin: 0 auto;
 }
 
-/* 제목 크게, 중앙 정렬 */
+/* 큰 제목 */
 .app-title {
     font-size: 3.2rem; font-weight: 900; letter-spacing: -0.02em;
     margin: 0.2rem 0 0.8rem 0; text-align: center;
-}
-.app-sub {
-    color: var(--muted); font-size: 1.05rem; margin-bottom: 1.6rem;
-    text-align: center;
 }
 
 /* 섹션 간 여백 */
 .section { margin: 1.8rem 0; }
 
-/* KPI 정렬 */
-[data-testid="stMetric"] {
-    text-align: center;
-}
+/* KPI 중앙 정렬 */
+[data-testid="stMetric"] { text-align: center; }
 [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
 [data-testid="stMetricValue"]  { color: var(--text) !important; }
 
-/* 소제목 정렬 */
-h4 { text-align: center; margin-bottom: 0.6rem; }
+/* 지도 제목 왼쪽 정렬 */
+h4 { text-align: left; margin-bottom: 0.6rem; }
 
-/* 지도 attribution 간소화 */
+/* 지도 attribution 및 스케일바 숨김 */
 .leaflet-control-attribution { display: none; }
+.leaflet-control-scale { display: none !important; }
 
-/* 얇은 구분선 */
-.divider {
-    height: 1px; background: #e5e7eb; margin: 1.4rem 0;
-}
+/* 구분선 */
+.divider { height: 1px; background: #e5e7eb; margin: 1.4rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Mapbox 토큰(미사용, 기존 코드 호환만) ────────────────────────────────────────
+# ── Mapbox 토큰 (경로 계산용) ───────────────────────────────────────────────────
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 
 # ── 데이터 ──────────────────────────────────────────────────────────────────────
@@ -80,7 +72,7 @@ APARTMENTS = {
     },
 }
 
-# ── 라우팅 함수 (기능 로직 그대로) ───────────────────────────────────────────────
+# ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
     if not MAPBOX_TOKEN:
@@ -106,9 +98,6 @@ def mapbox_route(points_latlon, profile="driving"):
 
 # ── CARTO 타일 적용 ─────────────────────────────────────────────────────────────
 def add_carto_tile(m: folium.Map, theme="positron"):
-    """
-    theme: 'positron' | 'dark_matter'
-    """
     if theme == "dark_matter":
         folium.TileLayer(tiles="CartoDB Dark_Matter", control=False).add_to(m)
     else:
@@ -131,18 +120,17 @@ def add_legend(m: folium.Map):
 
 # ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 MAT 기반 아파트 네비게이션</div>', unsafe_allow_html=True)
-st.markdown('<div class="app-sub">출발지와 단지를 선택하면 AS-IS/TO-BE 경로와 소요시간을 비교합니다.</div>', unsafe_allow_html=True)
 
-# ── 컨트롤(가운데 정렬, 균형 배치) ──────────────────────────────────────────────
+# ── 컨트롤 ─────────────────────────────────────────────────────────────────────
 c1, c2, c3 = st.columns([1, 1, 1])
 with c1:
     origin_name = st.selectbox("출발지", list(ORIGINS.keys()), index=0)
 with c2:
     apartment_name = st.selectbox("아파트 단지", list(APARTMENTS.keys()), index=0)
 with c3:
-    st.write("")  # 균형용 공간
+    st.write("")
 
-# ── 경로 계산 ────────────────────────────────────────────────────────────────────
+# ── 경로 계산 ───────────────────────────────────────────────────────────────────
 origin = ORIGINS[origin_name]
 apt = APARTMENTS[apartment_name]
 apt_gate, apt_front, center_hint = apt["gate"], apt["front"], apt["center"]
@@ -155,7 +143,7 @@ asis_total = (drv1_min or 0) + (walk1_min or 0)
 improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
-# ── KPI (가운데 정렬, 균형) ─────────────────────────────────────────────────────
+# ── KPI ────────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns([1, 1, 1, 1])
 k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
 k2.metric("AS-IS 도보", f"{(walk1_min or 0):.2f}분")
@@ -164,13 +152,13 @@ k4.metric("총 개선", f"{improvement_min:.2f}분", f"{improvement_pct:.1f}%")
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── 지도(2분할, CARTO 타일, 부드러운 경로) ─────────────────────────────────────
-map_height = 640  # 화면 비율 고려 적정 높이
+# ── 지도(스케일바 제거) ────────────────────────────────────────────────────────
+map_height = 640
 left, right = st.columns([1, 1])
 
 with left:
     st.markdown("#### 🚗 AS-IS — 정문까지 차량 + 잔여 도보")
-    m1 = folium.Map(location=center_hint, zoom_start=17, control_scale=True, zoom_control=True)
+    m1 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m1, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
     folium.Marker(apt_gate, popup="정문", icon=folium.Icon(color="red", icon="flag")).add_to(m1)
@@ -184,7 +172,7 @@ with left:
 
 with right:
     st.markdown("#### ✅ TO-BE — 아파트 앞까지 차량")
-    m2 = folium.Map(location=center_hint, zoom_start=17, control_scale=True, zoom_control=True)
+    m2 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m2, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
@@ -195,7 +183,7 @@ with right:
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── 결과 표 (중앙, 가독성 중심) ─────────────────────────────────────────────────
+# ── 결과 표 ─────────────────────────────────────────────────────────────────────
 result_df = pd.DataFrame([
     {"구분": "AS-IS 차량", "거리(km)": round(drv1_km or 0, 2), "시간(분)": round(drv1_min or 0, 2)},
     {"구분": "AS-IS 도보", "거리(km)": round(walk1_km or 0, 2), "시간(분)": round(walk1_min or 0, 2)},
@@ -205,7 +193,7 @@ st.dataframe(result_df, use_container_width=True, hide_index=True)
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── 골든타임·생존 인원 분석 (입력 가능) ─────────────────────────────────────────
+# ── 골든타임·생존 인원 분석 ────────────────────────────────────────────────────
 st.markdown("### 🚑 골든타임 영향 및 생존 인원 추정")
 colA, colB, colC = st.columns([1, 1, 1])
 with colA:
@@ -225,6 +213,3 @@ st.markdown(
     f"1분 단축당 생존율 개선을 **{survival_gain_per_min*100:.1f}%p**로 보았을 때, "
     f"연간 출동 **{annual_cases:,}건** 기준으로 추가 생존 가능 인원은 약 **{saved_people:,}명**으로 추정된다."
 )
-
-# ── 푸터 ─────────────────────────────────────────────────────────────────────────
-st.caption(f"업데이트: {datetime.now().strftime('%Y-%m-%d')} · 지도: CARTO (Positron) · 경로: Mapbox Directions API, Folium AntPath")
