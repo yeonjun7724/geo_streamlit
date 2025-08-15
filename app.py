@@ -19,7 +19,7 @@ APARTMENTS = {
     "미사강변센트럴풍경채": {
         "center": [37.556591, 127.183081], 
         "gate":   [37.556844, 127.181887], 
-        "front":  [37.557073, 127.183559], 
+        "front":  [37.557088, 127.183036],
     },
     "미사강변 푸르지오": {
         "center": [37.564925, 127.184055], 
@@ -117,6 +117,7 @@ result_df = pd.DataFrame([
 st.dataframe(result_df, use_container_width=True)
 
 st.caption(f"업데이트: {datetime.now().strftime('%Y-%m-%d')} | 데이터 소스: Mapbox Directions API")
+
 
 
 
