@@ -7,7 +7,7 @@ import requests
 from folium.plugins import AntPath
 
 # ── 페이지 기본 설정 ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="하남시 MAT 기반 아파트 네비게이션", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="하남시 MAT(벡터증축변환) 기반 아파트 확장 네비게이션", page_icon="🏢", layout="wide")
 
 # ── 전역 스타일 (카드X, 정렬/크기 조정) ──────────────────────────────────────────
 st.markdown("""
@@ -181,7 +181,7 @@ map_height = 640
 left, right = st.columns(2)
 
 with left:
-    st.markdown("#### 🚗 AS-IS — 정문까지 차량 + 잔여 도보")
+    st.markdown("#### AS-IS — 정문까지 차량 + 잔여 도보")
     m1 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m1, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
@@ -195,7 +195,7 @@ with left:
     st_folium(m1, use_container_width=True, height=map_height)
 
 with right:
-    st.markdown("#### ✅ TO-BE — 아파트 앞까지 차량")
+    st.markdown("#### TO-BE — 아파트 앞까지 차량")
     m2 = folium.Map(location=center_hint, zoom_start=17, control_scale=False, zoom_control=True)
     add_carto_tile(m2, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
@@ -237,3 +237,4 @@ st.markdown(
     f"1분 단축당 생존율 개선을 **{survival_increase_rate*100:.1f}%p**로 보았을 때, "
     f"연간 출동 **{annual_cases:,}건** 기준으로 추가 생존 가능 인원은 약 **{saved_people:,}명**으로 추정된다."
 )
+
