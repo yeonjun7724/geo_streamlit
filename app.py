@@ -20,7 +20,10 @@ st.set_page_config(
 # ──────────────────────────────────────────────────────────────────────────────
 # Secrets / Tokens
 # ──────────────────────────────────────────────────────────────────────────────
-MAPBOX_TOKEN = st.secrets.get("pk.eyJ1Ijoia2lteWVvbmp1biIsImEiOiJjbWRiZWw2NTEwNndtMmtzNHhocmNiMHllIn0.r7R2ConWouvP-Bmsppuvzw", os.getenv("pk.eyJ1Ijoia2lteWVvbmp1biIsImEiOiJjbWRiZWw2NTEwNndtMmtzNHhocmNiMHllIn0.r7R2ConWouvP-Bmsppuvzw", ""))
+# ⚠️ 토큰은 절대 코드에 하드코딩하지 마세요.
+# Streamlit Cloud: Settings → Secrets에 MAPBOX_TOKEN 추가
+# 로컬: 환경변수 MAPBOX_TOKEN 설정 (예: export MAPBOX_TOKEN=xxxxx)
+MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 if not MAPBOX_TOKEN:
     st.warning("Mapbox 토큰(MAPBOX_TOKEN)이 설정되지 않았습니다. 사이드바의 안내를 참고해 주세요.")
 
@@ -221,12 +224,14 @@ with as_is_tab:
             folium.PolyLine(locations=route1, color=style["route_color"], weight=4, opacity=0.85, popup="AS-IS 경로").add_to(m1)
         st_folium(m1, use_container_width=True, height=360)
         st.error("정문까지만 안내 가능")
-        st.markdown("""
-        • 목적지: 아파트 정문  
-        • 단지 내 길찾기: 불가능  
-        • 추가 도보시간: 3–5분  
-        • 긴급상황 대응: 제한적
-        """)
+        st.markdown(
+            """
+            • 목적지: 아파트 정문  
+            • 단지 내 길찾기: 불가능  
+            • 추가 도보시간: 3–5분  
+            • 긴급상황 대응: 제한적
+            """
+        )
 
     with right:
         st.markdown("#### ✅ TO BE - MAT 기반 네비게이션 (정문 → 단지 내부 목적지)")
@@ -272,22 +277,26 @@ with effect_tab:
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
         st.markdown("#### 시간대별 네비게이션 성능")
-        time_df = pd.DataFrame({
-            "시간대": ["06-09", "09-12", "12-15", "15-18", "18-21", "21-24"],
-            "AS IS": [5.8, 4.9, 4.7, 6.2, 5.5, 4.3],
-            "TO BE": [4.2, 3.8, 3.6, 4.8, 4.1, 3.4],
-        })
+        time_df = pd.DataFrame(
+            {
+                "시간대": ["06-09", "09-12", "12-15", "15-18", "18-21", "21-24"],
+                "AS IS": [5.8, 4.9, 4.7, 6.2, 5.5, 4.3],
+                "TO BE": [4.2, 3.8, 3.6, 4.8, 4.1, 3.4],
+            }
+        )
         fig = px.line(time_df, x="시간대", y=["AS IS", "TO BE"], title="평균 도달시간 (분)", markers=True)
         fig.update_layout(height=320, legend_title_text="")
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.markdown("#### 아파트 단지별 개선 효과")
-        apt_df = pd.DataFrame({
-            "아파트": ["한강센트럴", "신리마을", "고덕래미안", "고덕그라시움"],
-            "시간단축률": [25, 23, 28, 19],
-            "정확도개선": [22, 28, 24, 26],
-        })
+        apt_df = pd.DataFrame(
+            {
+                "아파트": ["한강센트럴", "신리마을", "고덕래미안", "고덕그라시움"],
+                "시간단축률": [25, 23, 28, 19],
+                "정확도개선": [22, 28, 24, 26],
+            }
+        )
         fig2 = px.bar(apt_df, x="아파트", y=["시간단축률", "정확도개선"], title="단지별 개선 효과 (%)", barmode="group")
         fig2.update_layout(height=320, legend_title_text="")
         st.plotly_chart(fig2, use_container_width=True)
@@ -336,10 +345,7 @@ with sim_tab:
         if apt["buildings"]:
             route_pts = [apt["entrance"]] + [[b["lat"], b["lon"]] for b in apt["buildings"]]
             # MAT 샘플 경로(토큰 있을 시 실제 경로로 대체 가능)
-            if MAPBOX_TOKEN:
-                coords = mapbox_route(route_pts, profile="driving")
-            else:
-                coords = route_pts
+            coords = mapbox_route(route_pts, profile="driving") if MAPBOX_TOKEN else route_pts
             if coords:
                 folium.PolyLine(locations=coords, color=color, weight=2, opacity=0.6, popup=f"{apt_name} 경로").add_to(m_total)
 
@@ -388,5 +394,3 @@ st.markdown(
     - **업데이트**: {datetime.now().strftime('%Y-%m-%d')} 기준
     """
 )
-
-
