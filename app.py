@@ -362,6 +362,20 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# 레퍼런스 추가
+st.markdown(
+    """
+    <small style='color:gray'>
+    <strong>참고문헌</strong><br>
+    1. American Heart Association (2020). <em>2020 American Heart Association Guidelines for Cardiopulmonary Resuscitation and Emergency Cardiovascular Care</em>. Circulation, 142(16_suppl_2), S337–S357.<br>
+    2. Larsen, M. P., Eisenberg, M. S., Cummins, R. O., & Hallstrom, A. P. (1993). Predicting survival from out-of-hospital cardiac arrest: a graphic model. <em>Annals of Emergency Medicine</em>, 22(11), 1652–1658.<br>
+    3. 소방청 (2024). <em>2023년 소방활동 통계연보</em>. 세종: 소방청.
+    </small>
+    """,
+    unsafe_allow_html=True
+)
+
+
 
 
 
