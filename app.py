@@ -1,4 +1,6 @@
 import os
+import math
+import random
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
@@ -37,12 +39,17 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 .stSelectbox, .stSelectbox > div { width: 100% !important; }
 .stSelectbox div[role="combobox"] { width: 100% !important; }
 
-/* KPI 정렬/색: 기본은 블랙 */
+/* KPI 기본: 블랙 */
 [data-testid="stMetric"] { text-align: center; }
 [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
 [data-testid="stMetricValue"]  { color: var(--text) !important; }
 
-/* "총 개선" 전용 KPI (파랑) */
+/* 커스텀 KPI: 블랙(AS-IS 도보, TO-BE 차량) */
+.metric-plain { text-align:center; }
+.metric-plain .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.metric-plain .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--text); }
+
+/* 커스텀 KPI: 파랑(총 개선) */
 .metric-wrap { text-align:center; }
 .metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
 .metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--blue); }
@@ -50,11 +57,6 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
     display:inline-block; margin-top: 6px; padding: 2px 8px; font-size: 0.85rem;
     background: var(--blue-weak); color: var(--blue); border-radius: 999px;
 }
-
-/* "TO-BE 차량" 전용 KPI (파랑) */
-.metric-blue { text-align:center; }
-.metric-blue .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.metric-blue .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--blue); }
 
 /* 지도 섹션 제목 */
 h4 { text-align: left; margin-bottom: 0.6rem; }
@@ -71,90 +73,74 @@ h4 { text-align: left; margin-bottom: 0.6rem; }
 # ── Mapbox 토큰 ─────────────────────────────────────────────────────────────────
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 
-# ── 데이터 (아파트 + 소화전/소방차 전용구역 하드코딩) ──────────────────────────
+# ── 데이터 (출발지 + 아파트) ────────────────────────────────────────────────────
 ORIGINS = {
     "하남소방서": [37.539826, 127.220661],
     "미사강변119안전센터": [37.566902, 127.185298],
 }
-
 APARTMENTS = {
     "미사강변센트럴풍경채": {
         "center": [37.556591, 127.183081],
         "gate":   [37.556844, 127.181887],
         "front":  [37.557088, 127.183036],
-        "hydrants": [  # 소화전
-            [37.55685, 127.18342],
-            [37.55635, 127.18290],
-            [37.55695, 127.18260],
-        ],
-        "fire_lanes": [  # 소방차 전용구역
-            [37.55660, 127.18380],
-            [37.55630, 127.18315],
-            [37.55695, 127.18325],
-        ],
     },
     "미사강변 푸르지오": {
         "center": [37.564925, 127.184055],
         "gate":   [37.565196, 127.182840],
         "front":  [37.566168, 127.182795],
-        "hydrants": [
-            [37.56510, 127.18430],
-            [37.56470, 127.18380],
-            [37.56530, 127.18370],
-        ],
-        "fire_lanes": [
-            [37.56495, 127.18450],
-            [37.56460, 127.18405],
-            [37.56525, 127.18425],
-        ],
     },
     "미사강변 리슈빌": {
-        "center": [37.572842, 127.180515],
-        "gate":   [37.573449, 127.181672],
-        "front":  [37.573080, 127.180428],
-        "hydrants": [
-            [37.57300, 127.18080],
-            [37.57260, 127.18030],
-            [37.57295, 127.18010],
-        ],
-        "fire_lanes": [
-            [37.57310, 127.18095],
-            [37.57270, 127.18055],
-            [37.57315, 127.18040],
-        ],
+        "center": [37.572842, 127.180515], 
+        "gate":   [37.573449, 127.181672], 
+        "front":  [37.573080, 127.180428], 
     },
     "미사강변 센트리버": {
-        "center": [37.573741, 127.183326],
-        "gate":   [37.573164, 127.181960],
-        "front":  [37.573263, 127.183110],
-        "hydrants": [
-            [37.57385, 127.18365],
-            [37.57345, 127.18310],
-            [37.57395, 127.18300],
-        ],
-        "fire_lanes": [
-            [37.57370, 127.18380],
-            [37.57340, 127.18345],
-            [37.57395, 127.18330],
-        ],
-    },
+        "center": [37.573741, 127.183326], 
+        "gate":   [37.573164, 127.181960], 
+        "front":  [37.573263, 127.183110], 
+    },    
     "미사강변 한신휴플리스": {
-        "center": [37.573769, 127.191912],
-        "gate":   [37.572975, 127.192083],
-        "front":  [37.573456, 127.191935],
-        "hydrants": [
-            [37.57390, 127.19225],
-            [37.57355, 127.19160],
-            [37.57325, 127.19210],
-            [37.57380, 127.19170],
-        ],
-        "fire_lanes": [
-            [37.57370, 127.19230],
-            [37.57335, 127.19180],
-            [37.57395, 127.19195],
-        ],
+        "center": [37.573769, 127.191912], 
+        "gate":   [37.572975, 127.192083], 
+        "front":  [37.573456, 127.191935], 
     },
 }
+
+# ── 유틸: 경로 주변 좌표 생성 ──────────────────────────────────────────────────
+def meter_offset_to_deg(lat, dx_m, dy_m):
+    dlat = dy_m / 111000.0
+    dlon = dx_m / (111000.0 * max(math.cos(math.radians(lat)), 1e-6))
+    return dlat, dlon
+
+def points_near_polyline(coords_latlon, n=3, offset_m=10, seed=0):
+    """경로 배열(coords_latlon: [[lat,lon], ...])에서 균등 샘플 n개를 고르고,
+       각 점을 경로의 수직 방향으로 offset_m만큼 이동시켜 근접 표식 좌표를 만든다."""
+    if not coords_latlon:
+        return []
+    random.seed(seed)
+    L = len(coords_latlon)
+    if L < 2:
+        return [coords_latlon[0]] * n
+    idxs = [max(1, int(round(i * (L-1) / (n+1)))) for i in range(1, n+1)]
+    out = []
+    for idx in idxs:
+        lat, lon = coords_latlon[idx]
+        lat_prev, lon_prev = coords_latlon[idx-1]
+        # 진행방향(이전->현재) 벡터
+        dx = lon - lon_prev
+        dy = lat - lat_prev
+        # 수직 방향
+        perp_lat, perp_lon = -dx, dy
+        norm = math.hypot(perp_lon, perp_lat)
+        if norm == 0:
+            out.append([lat, lon])
+            continue
+        perp_lat /= norm
+        perp_lon /= norm
+        # 현 위도 기준 오프셋(m)을 deg로 변환
+        dlat, dlon = meter_offset_to_deg(lat, perp_lon * offset_m, perp_lat * offset_m)
+        out.append([lat + dlat, lon + dlon])
+    return out
 
 # ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
@@ -212,17 +198,46 @@ def add_legend(m: folium.Map):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-# ── 안전시설 표시 (하드코딩 좌표 사용) ──────────────────────────────────────────
-def add_fixed_safety(m: folium.Map, apt_info: dict):
+# ── 안전시설 표시: 경로 인근 자동 배치 ─────────────────────────────────────────
+def add_safety_near_routes(m: folium.Map, center_latlon, drv1, walk1, drv2):
+    """소화전(3~4개), 소방차 전용구역(3~4개)을 실제 경로 인근으로 배치."""
+    # 경로 합치기 (우선순위: 차량→도보→TO-BE 차량)
+    all_coords = []
+    for seg in [drv1, walk1, drv2]:
+        if seg:
+            all_coords.extend(seg)
+
+    # 경로가 없으면 아파트 중심 주변에 배치
+    seed_base = int((center_latlon[0]*10000) % 1000)
+    if not all_coords:
+        random.seed(seed_base)
+        hydrants = []
+        fire_lanes = []
+        for i in range(3):
+            r = 20 + 5 * random.random()
+            theta = random.random() * 2 * math.pi
+            dlat, dlon = meter_offset_to_deg(center_latlon[0], r*math.cos(theta), r*math.sin(theta))
+            hydrants.append([center_latlon[0]+dlon, center_latlon[1]+dlat])
+        for i in range(3):
+            r = 28 + 5 * random.random()
+            theta = random.random() * 2 * math.pi
+            dlat, dlon = meter_offset_to_deg(center_latlon[0], r*math.cos(theta), r*math.sin(theta))
+            fire_lanes.append([center_latlon[0]+dlon, center_latlon[1]+dlat])
+    else:
+        # 경로 따라 근접 위치 생성
+        hydrants = points_near_polyline(all_coords, n=4, offset_m=8, seed=seed_base+10)
+        fire_lanes = points_near_polyline(all_coords, n=3, offset_m=12, seed=seed_base+20)
+
     # 소화전
-    for i, (lat, lon) in enumerate(apt_info.get("hydrants", []), 1):
+    for i, (lat, lon) in enumerate(hydrants, 1):
         folium.Marker(
             [lat, lon],
             tooltip=f"소화전 #{i}",
             icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")
         ).add_to(m)
+
     # 소방차 전용구역
-    for i, (lat, lon) in enumerate(apt_info.get("fire_lanes", []), 1):
+    for i, (lat, lon) in enumerate(fire_lanes, 1):
         folium.Marker(
             [lat, lon],
             tooltip=f"소방차 전용구역 #{i}",
@@ -252,15 +267,25 @@ asis_total = (drv1_min or 0) + (walk1_min or 0)
 improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
-# ── KPI: k1,k2=블랙(기본 st.metric), k3=파랑(커스텀), k4=파랑(커스텀) ─────────────
+# ── KPI: k1=기본(st.metric, 블랙), k2=커스텀 블랙, k3=커스텀 블랙, k4=파랑 ────────
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
-k2.metric("AS-IS 도보", f"{(walk1_min or 0):.2f}분")
 
-# TO-BE 차량 (파랑)
+# AS-IS 도보 (블랙, 커스텀 폰트/레이아웃)
+k2.markdown(
+    f"""
+    <div class="metric-plain">
+      <div class="label">AS-IS 도보</div>
+      <div class="value">{(walk1_min or 0):.2f}분</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# TO-BE 차량 (블랙, 커스텀 폰트/레이아웃)
 k3.markdown(
     f"""
-    <div class="metric-blue">
+    <div class="metric-plain">
       <div class="label">TO-BE 차량</div>
       <div class="value">{(drv2_min or 0):.2f}분</div>
     </div>
@@ -299,7 +324,8 @@ with left:
         AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
     if walk1_coords:
         AntPath(walk1_coords, color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
-    add_fixed_safety(m1, apt)
+    # 경로 인근 안전시설 표시
+    add_safety_near_routes(m1, center_hint, drv1_coords, walk1_coords, drv2_coords)
     add_legend(m1)
     st_folium(m1, use_container_width=True, height=map_height)
 
@@ -311,7 +337,8 @@ with right:
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
     if drv2_coords:
         AntPath(drv2_coords, color="#9467bd", weight=6, opacity=0.95, delay=800).add_to(m2)
-    add_fixed_safety(m2, apt)
+    # 경로 인근 안전시설 표시 (동일 로직)
+    add_safety_near_routes(m2, center_hint, drv1_coords, walk1_coords, drv2_coords)
     add_legend(m2)
     st_folium(m2, use_container_width=True, height=map_height)
 
