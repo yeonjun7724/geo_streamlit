@@ -1,6 +1,5 @@
 import os
 import math
-import random
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
@@ -44,12 +43,12 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
 [data-testid="stMetricValue"]  { color: var(--text) !important; }
 
-/* 커스텀 KPI: 블랙(AS-IS 도보, TO-BE 차량) */
+/* 커스텀 KPI (블랙) : AS-IS 차량, AS-IS 도보, TO-BE 차량 공통 */
 .metric-plain { text-align:center; }
 .metric-plain .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
 .metric-plain .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--text); }
 
-/* 커스텀 KPI: 파랑(총 개선) */
+/* 커스텀 KPI (파랑) : 총 개선 */
 .metric-wrap { text-align:center; }
 .metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
 .metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--blue); }
@@ -73,74 +72,95 @@ h4 { text-align: left; margin-bottom: 0.6rem; }
 # ── Mapbox 토큰 ─────────────────────────────────────────────────────────────────
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 
-# ── 데이터 (출발지 + 아파트) ────────────────────────────────────────────────────
+# ── 데이터 (출발지 + 아파트 + 경로 인근 하드코딩 안전시설) ──────────────────────
 ORIGINS = {
     "하남소방서": [37.539826, 127.220661],
     "미사강변119안전센터": [37.566902, 127.185298],
 }
+
+# 각 단지: gate↔front(도보 경로)와 front 인근에 30m 내외로 배치한 좌표들
 APARTMENTS = {
     "미사강변센트럴풍경채": {
         "center": [37.556591, 127.183081],
         "gate":   [37.556844, 127.181887],
         "front":  [37.557088, 127.183036],
+        "hydrants": [  # 소화전(3~4)
+            [37.55695, 127.18220],
+            [37.55702, 127.18255],
+            [37.55706, 127.18285],
+            [37.55710, 127.18305],
+        ],
+        "fire_lanes": [  # 소방차 전용구역(3)
+            [37.55712, 127.18302],
+            [37.55692, 127.18298],
+            [37.55698, 127.18322],
+        ],
     },
     "미사강변 푸르지오": {
         "center": [37.564925, 127.184055],
         "gate":   [37.565196, 127.182840],
         "front":  [37.566168, 127.182795],
+        "hydrants": [
+            [37.56530, 127.18310],
+            [37.56560, 127.18305],
+            [37.56590, 127.18295],
+            [37.56610, 127.18285],
+        ],
+        "fire_lanes": [
+            [37.56605, 127.18280],
+            [37.56585, 127.18315],
+            [37.56555, 127.18320],
+        ],
     },
     "미사강변 리슈빌": {
-        "center": [37.572842, 127.180515], 
-        "gate":   [37.573449, 127.181672], 
-        "front":  [37.573080, 127.180428], 
+        "center": [37.572842, 127.180515],
+        "gate":   [37.573449, 127.181672],
+        "front":  [37.573080, 127.180428],
+        "hydrants": [
+            [37.57320, 127.18110],
+            [37.57318, 127.18085],
+            [37.57312, 127.18065],
+            [37.57308, 127.18050],
+        ],
+        "fire_lanes": [
+            [37.57310, 127.18040],
+            [37.57325, 127.18070],
+            [37.57300, 127.18080],
+        ],
     },
     "미사강변 센트리버": {
-        "center": [37.573741, 127.183326], 
-        "gate":   [37.573164, 127.181960], 
-        "front":  [37.573263, 127.183110], 
-    },    
+        "center": [37.573741, 127.183326],
+        "gate":   [37.573164, 127.181960],
+        "front":  [37.573263, 127.183110],
+        "hydrants": [
+            [37.57325, 127.18230],
+            [37.57330, 127.18270],
+            [37.57332, 127.18295],
+            [37.57330, 127.18315],
+        ],
+        "fire_lanes": [
+            [37.57327, 127.18308],
+            [37.57315, 127.18285],
+            [37.57340, 127.18290],
+        ],
+    },
     "미사강변 한신휴플리스": {
-        "center": [37.573769, 127.191912], 
-        "gate":   [37.572975, 127.192083], 
-        "front":  [37.573456, 127.191935], 
+        "center": [37.573769, 127.191912],
+        "gate":   [37.572975, 127.192083],
+        "front":  [37.573456, 127.191935],
+        "hydrants": [
+            [37.57315, 127.19205],
+            [37.57330, 127.19200],
+            [37.57355, 127.19198],
+            [37.57370, 127.19195],
+        ],
+        "fire_lanes": [
+            [37.57346, 127.19190],
+            [37.57332, 127.19182],
+            [37.57362, 127.19188],
+        ],
     },
 }
-
-# ── 유틸: 경로 주변 좌표 생성 ──────────────────────────────────────────────────
-def meter_offset_to_deg(lat, dx_m, dy_m):
-    dlat = dy_m / 111000.0
-    dlon = dx_m / (111000.0 * max(math.cos(math.radians(lat)), 1e-6))
-    return dlat, dlon
-
-def points_near_polyline(coords_latlon, n=3, offset_m=10, seed=0):
-    """경로 배열(coords_latlon: [[lat,lon], ...])에서 균등 샘플 n개를 고르고,
-       각 점을 경로의 수직 방향으로 offset_m만큼 이동시켜 근접 표식 좌표를 만든다."""
-    if not coords_latlon:
-        return []
-    random.seed(seed)
-    L = len(coords_latlon)
-    if L < 2:
-        return [coords_latlon[0]] * n
-    idxs = [max(1, int(round(i * (L-1) / (n+1)))) for i in range(1, n+1)]
-    out = []
-    for idx in idxs:
-        lat, lon = coords_latlon[idx]
-        lat_prev, lon_prev = coords_latlon[idx-1]
-        # 진행방향(이전->현재) 벡터
-        dx = lon - lon_prev
-        dy = lat - lat_prev
-        # 수직 방향
-        perp_lat, perp_lon = -dx, dy
-        norm = math.hypot(perp_lon, perp_lat)
-        if norm == 0:
-            out.append([lat, lon])
-            continue
-        perp_lat /= norm
-        perp_lon /= norm
-        # 현 위도 기준 오프셋(m)을 deg로 변환
-        dlat, dlon = meter_offset_to_deg(lat, perp_lon * offset_m, perp_lat * offset_m)
-        out.append([lat + dlat, lon + dlon])
-    return out
 
 # ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
@@ -198,46 +218,17 @@ def add_legend(m: folium.Map):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
-# ── 안전시설 표시: 경로 인근 자동 배치 ─────────────────────────────────────────
-def add_safety_near_routes(m: folium.Map, center_latlon, drv1, walk1, drv2):
-    """소화전(3~4개), 소방차 전용구역(3~4개)을 실제 경로 인근으로 배치."""
-    # 경로 합치기 (우선순위: 차량→도보→TO-BE 차량)
-    all_coords = []
-    for seg in [drv1, walk1, drv2]:
-        if seg:
-            all_coords.extend(seg)
-
-    # 경로가 없으면 아파트 중심 주변에 배치
-    seed_base = int((center_latlon[0]*10000) % 1000)
-    if not all_coords:
-        random.seed(seed_base)
-        hydrants = []
-        fire_lanes = []
-        for i in range(3):
-            r = 20 + 5 * random.random()
-            theta = random.random() * 2 * math.pi
-            dlat, dlon = meter_offset_to_deg(center_latlon[0], r*math.cos(theta), r*math.sin(theta))
-            hydrants.append([center_latlon[0]+dlon, center_latlon[1]+dlat])
-        for i in range(3):
-            r = 28 + 5 * random.random()
-            theta = random.random() * 2 * math.pi
-            dlat, dlon = meter_offset_to_deg(center_latlon[0], r*math.cos(theta), r*math.sin(theta))
-            fire_lanes.append([center_latlon[0]+dlon, center_latlon[1]+dlat])
-    else:
-        # 경로 따라 근접 위치 생성
-        hydrants = points_near_polyline(all_coords, n=4, offset_m=8, seed=seed_base+10)
-        fire_lanes = points_near_polyline(all_coords, n=3, offset_m=12, seed=seed_base+20)
-
+# ── 안전시설 표시 (하드코딩 좌표 사용) ──────────────────────────────────────────
+def add_fixed_safety(m: folium.Map, apt_info: dict):
     # 소화전
-    for i, (lat, lon) in enumerate(hydrants, 1):
+    for i, (lat, lon) in enumerate(apt_info.get("hydrants", []), 1):
         folium.Marker(
             [lat, lon],
             tooltip=f"소화전 #{i}",
             icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")
         ).add_to(m)
-
     # 소방차 전용구역
-    for i, (lat, lon) in enumerate(fire_lanes, 1):
+    for i, (lat, lon) in enumerate(apt_info.get("fire_lanes", []), 1):
         folium.Marker(
             [lat, lon],
             tooltip=f"소방차 전용구역 #{i}",
@@ -267,11 +258,19 @@ asis_total = (drv1_min or 0) + (walk1_min or 0)
 improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
-# ── KPI: k1=기본(st.metric, 블랙), k2=커스텀 블랙, k3=커스텀 블랙, k4=파랑 ────────
+# ── KPI: 세 개 모두 커스텀(블랙), "총 개선"만 파랑 ────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
 
-# AS-IS 도보 (블랙, 커스텀 폰트/레이아웃)
+k1.markdown(
+    f"""
+    <div class="metric-plain">
+      <div class="label">AS-IS 차량</div>
+      <div class="value">{(drv1_min or 0):.2f}분</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
 k2.markdown(
     f"""
     <div class="metric-plain">
@@ -282,7 +281,6 @@ k2.markdown(
     unsafe_allow_html=True
 )
 
-# TO-BE 차량 (블랙, 커스텀 폰트/레이아웃)
 k3.markdown(
     f"""
     <div class="metric-plain">
@@ -293,7 +291,6 @@ k3.markdown(
     unsafe_allow_html=True
 )
 
-# 총 개선 (파랑)
 impr_min_txt = f"{(improvement_min):.2f}분"
 impr_pct_txt = f"{(improvement_pct):.1f}%"
 k4.markdown(
@@ -324,8 +321,7 @@ with left:
         AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
     if walk1_coords:
         AntPath(walk1_coords, color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
-    # 경로 인근 안전시설 표시
-    add_safety_near_routes(m1, center_hint, drv1_coords, walk1_coords, drv2_coords)
+    add_fixed_safety(m1, apt)   # 경로 인근으로 하드코딩해둔 좌표
     add_legend(m1)
     st_folium(m1, use_container_width=True, height=map_height)
 
@@ -337,8 +333,7 @@ with right:
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
     if drv2_coords:
         AntPath(drv2_coords, color="#9467bd", weight=6, opacity=0.95, delay=800).add_to(m2)
-    # 경로 인근 안전시설 표시 (동일 로직)
-    add_safety_near_routes(m2, center_hint, drv1_coords, walk1_coords, drv2_coords)
+    add_fixed_safety(m2, apt)
     add_legend(m2)
     st_folium(m2, use_container_width=True, height=map_height)
 
