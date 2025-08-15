@@ -1,8 +1,10 @@
+import os
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
 import pandas as pd
 import plotly.express as px
+import requests
 from datetime import datetime
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -14,6 +16,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Secrets / Tokens
+# ──────────────────────────────────────────────────────────────────────────────
+MAPBOX_TOKEN = pk.eyJ1Ijoia2lteWVvbmp1biIsImEiOiJjbWRiZWw2NTEwNndtMmtzNHhocmNiMHllIn0.r7R2ConWouvP-Bmsppuvzw
+MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN", os.getenv("MAPBOX_TOKEN", ""))
+if not MAPBOX_TOKEN:
+    st.warning("Mapbox 토큰(MAPBOX_TOKEN)이 설정되지 않았습니다. 사이드바의 안내를 참고해 주세요.")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data
@@ -67,10 +77,55 @@ HANAM_APARTMENTS = {
 }
 
 SCENARIO_STYLES = {
-    "일반 상황": {"route_color": "blue", "icon_color": "blue"},
-    "긴급 상황 (소방)": {"route_color": "red", "icon_color": "red"},
-    "긴급 상황 (구급)": {"route_color": "green", "icon_color": "green"},
+    "일반 상황": {"route_color": "blue", "icon_color": "blue", "profile": "driving"},
+    "긴급 상황 (소방)": {"route_color": "red", "icon_color": "red", "profile": "driving"},
+    "긴급 상황 (구급)": {"route_color": "green", "icon_color": "green", "profile": "driving"},
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers (layout)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def section_title(title: str, subtitle: str = ""):
+    """Consistent section header with compact spacing."""
+    st.markdown(f"### {title}")
+    if subtitle:
+        st.caption(subtitle)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers (routing)
+# ──────────────────────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=300)
+def mapbox_route(points_latlon, profile="driving"):
+    """Call Mapbox Directions API and return a list of [lat, lon] for Folium.
+    points_latlon: [(lat, lon), ...]
+    """
+    if not MAPBOX_TOKEN:
+        return []
+    # Mapbox expects lon,lat order in the path
+    coords = ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
+    url = f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}"
+    params = {"geometries": "geojson", "overview": "full", "access_token": MAPBOX_TOKEN}
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("routes"):
+            return []
+        line = data["routes"][0]["geometry"]["coordinates"]  # [[lon,lat], ...]
+        return [[lat, lon] for lon, lat in line]
+    except Exception:
+        return []
+
+
+def add_mapbox_tile(m: folium.Map, style="mapbox/streets-v12"):
+    if not MAPBOX_TOKEN:
+        return m
+    tile_url = (
+        f"https://api.mapbox.com/styles/v1/{style}/tiles/256/{{z}}/{{x}}/{{y}}@2x?access_token={MAPBOX_TOKEN}"
+    )
+    folium.TileLayer(tiles=tile_url, attr="Mapbox", name="Mapbox", control=False).add_to(m)
+    return m
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Sidebar
@@ -78,26 +133,20 @@ SCENARIO_STYLES = {
 with st.sidebar:
     st.header("📍 연구지역 설정")
 
-    apartment_complex = st.selectbox(
-        "아파트 단지 선택",
-        list(HANAM_APARTMENTS.keys()),
-        index=0,
-    )
+    apartment_complex = st.selectbox("아파트 단지 선택", list(HANAM_APARTMENTS.keys()), index=0)
+    destination_type = st.selectbox("목적지 유형", ["동 출입구", "소화전", "관리사무소", "지하주차장", "놀이터"], index=0)
+    scenario = st.radio("비교 시나리오", list(SCENARIO_STYLES.keys()), index=0)
 
-    destination_type = st.selectbox(
-        "목적지 유형",
-        ["동 출입구", "소화전", "관리사무소", "지하주차장", "놀이터"],
-        index=0,
-    )
+    st.markdown("---")
+    st.subheader("🧭 출발지 설정")
+    default_origin = [37.5600, 127.1700]
+    col_o1, col_o2 = st.columns(2)
+    with col_o1:
+        origin_lat = st.number_input("위도(lat)", value=float(default_origin[0]), format="%0.6f")
+    with col_o2:
+        origin_lon = st.number_input("경도(lon)", value=float(default_origin[1]), format="%0.6f")
 
-    scenario = st.radio(
-        "비교 시나리오",
-        ["일반 상황", "긴급 상황 (소방)", "긴급 상황 (구급)"],
-        index=0,
-    )
-
-    st.divider()
-
+    st.markdown("---")
     st.subheader("📊 현재 성과")
     c1, c2 = st.columns(2)
     with c1:
@@ -107,200 +156,161 @@ with st.sidebar:
         st.metric("평균 시간단축", "23%", "+2.1%")
         st.metric("정확도", "97.8%", "+0.5%")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
-def make_as_is_map(apt: dict, route_color: str) -> folium.Map:
-    m = folium.Map(location=apt["center"], zoom_start=17, tiles="OpenStreetMap")
-
-    folium.Marker(
-        location=apt["entrance"],
-        popup="아파트 정문 (기존 네비 종료 지점)",
-        icon=folium.Icon(color="red", icon="stop"),
-    ).add_to(m)
-
-    folium.PolyLine(
-        locations=[
-            [37.5600, 127.1700],  # 샘플 출발지
-            apt["entrance"],
-        ],
-        color=route_color,
-        weight=3,
-        opacity=0.7,
-        popup="기존 네비 경로",
-    ).add_to(m)
-
-    return m
-
-
-def make_to_be_map(apt: dict, route_color: str, icon_color: str) -> folium.Map:
-    m = folium.Map(location=apt["center"], zoom_start=17, tiles="OpenStreetMap")
-
-    # 건물 출입구
-    for b in apt["buildings"]:
-        folium.Marker(
-            location=[b["lat"], b["lon"]],
-            popup=f"{b['name']} 출입구",
-            icon=folium.Icon(color=icon_color, icon="home"),
-        ).add_to(m)
-
-    # 시설물
-    for f in apt["facilities"]:
-        color = "red" if f["type"] == "hydrant" else "green"
-        icon = "tint" if f["type"] == "hydrant" else "info-sign"
-        folium.Marker(
-            location=[f["lat"], f["lon"]],
-            popup=f["name"],
-            icon=folium.Icon(color=color, icon=icon),
-        ).add_to(m)
-
-    # MAT 기반 경로 (샘플 경로: 정문 → 첫 번째 동)
-    if apt["buildings"]:
-        target = apt["buildings"][0]
-        folium.PolyLine(
-            locations=[
-                [37.5600, 127.1700],  # 샘플 출발지
-                apt["entrance"],
-                [target["lat"], target["lon"]],
-            ],
-            color=route_color,
-            weight=4,
-            opacity=0.85,
-            popup="MAT 기반 정밀 경로",
-        ).add_to(m)
-
-    return m
-
+    st.markdown("---")
+    st.subheader("🔑 Mapbox 토큰 설정")
+    st.caption("Streamlit Cloud에서는 **Secrets**에 `MAPBOX_TOKEN` 키로 저장하세요. 로컬 실행 시 환경변수 `MAPBOX_TOKEN`를 설정해도 됩니다.")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Main Title
 # ──────────────────────────────────────────────────────────────────────────────
 st.title("🏢 하남시 MAT 기반 아파트 네비게이션")
-st.caption("벡터 중축 변환(MAT) 알고리즘을 활용한 아파트 단지 내 정밀 네비게이션")
+st.caption("벡터 중축 변환(MAT) 알고리즘을 활용한 아파트 단지 내 정밀 네비게이션 — Mapbox 실경로 기반")
 
-# Tabs
+# Tabs (정렬 및 여백 일관화)
 as_is_tab, effect_tab, sim_tab = st.tabs(["🔄 AS IS vs TO BE", "📊 효과 분석", "🗺️ 실시간 시뮬레이션"])
 
-# Selected apartment
 selected = HANAM_APARTMENTS[apartment_complex]
 style = SCENARIO_STYLES[scenario]
+origin = [origin_lat, origin_lon]
+
+# 목적지 선택 로직
+# - 동 출입구: 첫 번째 building
+# - 시설: type 매칭
+# - 데이터 없으면 entrance로 fallback
+
+def pick_destination(apt: dict, destination_type: str):
+    if destination_type == "동 출입구" and apt.get("buildings"):
+        b = apt["buildings"][0]
+        return [b["lat"], b["lon"]], f"{b['name']} 출입구"
+    if destination_type == "소화전":
+        for f in apt.get("facilities", []):
+            if f.get("type") == "hydrant":
+                return [f["lat"], f["lon"]], f["name"]
+    if destination_type == "관리사무소":
+        for f in apt.get("facilities", []):
+            if f.get("type") == "office":
+                return [f["lat"], f["lon"]], f["name"]
+    # 지하주차장/놀이터 등 샘플 데이터에 없으면 동 출입구 또는 정문으로 대체
+    if apt.get("buildings"):
+        b = apt["buildings"][0]
+        return [b["lat"], b["lon"]], f"{b['name']} 출입구(대체)"
+    return apt["entrance"], "아파트 정문(대체)"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tab 1: AS-IS vs TO-BE
+# Tab 1: AS-IS vs TO-BE (실경로: Mapbox Directions)
 # ──────────────────────────────────────────────────────────────────────────────
 with as_is_tab:
-    st.subheader("🔄 기존 네비게이션 vs MAT 기반 네비게이션")
+    section_title("🔄 기존 네비게이션 vs MAT 기반 네비게이션")
+    left, right = st.columns([1, 1], gap="large")
 
-    c1, c2 = st.columns(2)
+    # 공통 지도 파라미터
+    map_kwargs = dict(zoom_start=17)
 
-    with c1:
-        st.markdown("#### ❌ AS IS - 기존 네비게이션")
-        m1 = make_as_is_map(selected, style["route_color"]) 
-        st_folium(m1, use_container_width=True, height=320)
+    # 목적지
+    dest_point, dest_label = pick_destination(selected, destination_type)
+
+    with left:
+        st.markdown("#### ❌ AS IS - 기존 네비게이션 (정문까지만)")
+        m1 = folium.Map(location=selected["center"], **map_kwargs)
+        add_mapbox_tile(m1)
+        # 마커
+        folium.Marker(location=origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
+        folium.Marker(location=selected["entrance"], popup="아파트 정문", icon=folium.Icon(color="red", icon="stop")).add_to(m1)
+        # 경로
+        route1 = mapbox_route([origin, selected["entrance"]], profile=style["profile"]) if MAPBOX_TOKEN else []
+        if route1:
+            folium.PolyLine(locations=route1, color=style["route_color"], weight=4, opacity=0.85, popup="AS-IS 경로").add_to(m1)
+        st_folium(m1, use_container_width=True, height=360)
         st.error("정문까지만 안내 가능")
-        st.markdown(
-            """
-            • 목적지: 아파트 정문  
-            • 단지 내 길찾기: 불가능  
-            • 추가 도보시간: 3–5분  
-            • 긴급상황 대응: 제한적
-            """
-        )
+        st.markdown("""
+        • 목적지: 아파트 정문  
+        • 단지 내 길찾기: 불가능  
+        • 추가 도보시간: 3–5분  
+        • 긴급상황 대응: 제한적
+        """)
 
-    with c2:
-        st.markdown("#### ✅ TO BE - MAT 기반 네비게이션")
-        m2 = make_to_be_map(selected, style["route_color"], style["icon_color"]) 
-        st_folium(m2, use_container_width=True, height=320)
+    with right:
+        st.markdown("#### ✅ TO BE - MAT 기반 네비게이션 (정문 → 단지 내부 목적지)")
+        m2 = folium.Map(location=selected["center"], **map_kwargs)
+        add_mapbox_tile(m2)
+        # 마커
+        folium.Marker(location=origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
+        folium.Marker(location=selected["entrance"], popup="아파트 정문", icon=folium.Icon(color="orange", icon="flag")).add_to(m2)
+        folium.Marker(location=dest_point, popup=dest_label, icon=folium.Icon(color=style["icon_color"], icon="home")).add_to(m2)
+        # 경로: origin → entrance → destination
+        route2 = mapbox_route([origin, selected["entrance"], dest_point], profile=style["profile"]) if MAPBOX_TOKEN else []
+        if route2:
+            folium.PolyLine(locations=route2, color=style["route_color"], weight=5, opacity=0.9, popup="TO-BE 경로").add_to(m2)
+        st_folium(m2, use_container_width=True, height=360)
         st.success("동 출입구까지 정확한 안내")
-        # 목적지 유형 안내표시
         st.markdown(
             f"""
             • 선택된 목적지 유형: **{destination_type}**  
-            • 목표: 첫 번째 동 출입구 기준 안내  
+            • 목표: **{dest_label}**  
             • 시간 단축: 평균 23%  
             • 긴급상황 대응: 최적화
             """
         )
 
-    st.divider()
-    st.subheader("📈 성능 비교")
-
-    comp_df = pd.DataFrame(
-        {
-            "구분": ["도달시간", "정확도", "사용자 만족도", "긴급대응"],
-            "AS IS": [5.2, 75.3, 3.2, 6.8],
-            "TO BE": [4.0, 97.8, 4.8, 4.4],
-            "개선율": [23, 30, 50, 35],
-        }
-    )
-
-    m_c1, m_c2, m_c3, m_c4 = st.columns(4)
-    with m_c1:
+    st.markdown("---")
+    section_title("📈 성능 비교")
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
         st.metric("평균 도달시간", "4.0분", "-1.2분 (23%↓)")
-    with m_c2:
+    with m2:
         st.metric("목적지 정확도", "97.8%", "+22.5%p")
-    with m_c3:
+    with m3:
         st.metric("사용자 만족도", "4.8/5.0", "+1.6점")
-    with m_c4:
+    with m4:
         st.metric("긴급대응시간", "4.4분", "-2.4분 (35%↓)")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tab 2: 효과 분석
+# Tab 2: 효과 분석 (정렬 개선)
 # ──────────────────────────────────────────────────────────────────────────────
 with effect_tab:
-    st.subheader("📊 MAT 알고리즘 효과 분석")
+    section_title("📊 MAT 알고리즘 효과 분석")
 
-    e1, e2 = st.columns(2)
-
-    with e1:
+    col1, col2 = st.columns([1, 1], gap="large")
+    with col1:
         st.markdown("#### 시간대별 네비게이션 성능")
-        time_df = pd.DataFrame(
-            {
-                "시간대": ["06-09", "09-12", "12-15", "15-18", "18-21", "21-24"],
-                "AS IS": [5.8, 4.9, 4.7, 6.2, 5.5, 4.3],
-                "TO BE": [4.2, 3.8, 3.6, 4.8, 4.1, 3.4],
-            }
-        )
+        time_df = pd.DataFrame({
+            "시간대": ["06-09", "09-12", "12-15", "15-18", "18-21", "21-24"],
+            "AS IS": [5.8, 4.9, 4.7, 6.2, 5.5, 4.3],
+            "TO BE": [4.2, 3.8, 3.6, 4.8, 4.1, 3.4],
+        })
         fig = px.line(time_df, x="시간대", y=["AS IS", "TO BE"], title="평균 도달시간 (분)", markers=True)
         fig.update_layout(height=320, legend_title_text="")
         st.plotly_chart(fig, use_container_width=True)
 
-    with e2:
+    with col2:
         st.markdown("#### 아파트 단지별 개선 효과")
-        apt_df = pd.DataFrame(
-            {
-                "아파트": ["한강센트럴", "신리마을", "고덕래미안", "고덕그라시움"],
-                "시간단축률": [25, 23, 28, 19],
-                "정확도개선": [22, 28, 24, 26],
-            }
-        )
+        apt_df = pd.DataFrame({
+            "아파트": ["한강센트럴", "신리마을", "고덕래미안", "고덕그라시움"],
+            "시간단축률": [25, 23, 28, 19],
+            "정확도개선": [22, 28, 24, 26],
+        })
         fig2 = px.bar(apt_df, x="아파트", y=["시간단축률", "정확도개선"], title="단지별 개선 효과 (%)", barmode="group")
         fig2.update_layout(height=320, legend_title_text="")
         st.plotly_chart(fig2, use_container_width=True)
 
-    st.divider()
+    st.markdown("---")
     st.markdown("#### 🚨 긴급상황 대응 효과")
-
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.markdown("**화재 상황**")
         st.metric("소방차 도달시간", "3.2분", "-2.1분")
         st.metric("소화전 접근시간", "45초", "-1.3분")
     with k2:
-        st.markdown("**응급의료 상황**")
         st.metric("구급차 도달시간", "3.8분", "-1.8분")
         st.metric("환자 이송시간", "2.1분", "-0.9분")
     with k3:
-        st.markdown("**치안 상황**")
         st.metric("경찰차 도달시간", "4.1분", "-1.5분")
         st.metric("현장 접근시간", "1.2분", "-0.7분")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tab 3: 실시간 시뮬레이션
+# Tab 3: 실시간 시뮬레이션 (정렬 및 타일 통일)
 # ──────────────────────────────────────────────────────────────────────────────
 with sim_tab:
-    st.subheader("🗺️ 실시간 네비게이션 시뮬레이션")
+    section_title("🗺️ 실시간 네비게이션 시뮬레이션")
 
     s1, s2, s3 = st.columns(3)
     with s1:
@@ -313,28 +323,26 @@ with sim_tab:
 
     st.markdown("#### 📍 하남시 전체 아파트 단지 현황")
 
-    # 전체 지도
-    m_total = folium.Map(location=[37.5539, 127.1650], zoom_start=14, tiles="OpenStreetMap")
+    m_total = folium.Map(location=[37.5539, 127.1650], zoom_start=14)
+    add_mapbox_tile(m_total)
 
     colors = ["blue", "green", "red", "purple"]
     for i, (apt_name, apt) in enumerate(HANAM_APARTMENTS.items()):
         color = colors[i % len(colors)]
-
         folium.Marker(
             location=apt["center"],
             popup=f"{apt_name}<br>등록 동수: {len(apt['buildings'])}개",
             icon=folium.Icon(color=color, icon="home"),
         ).add_to(m_total)
-
         if apt["buildings"]:
-            route = [apt["entrance"]] + [[b["lat"], b["lon"]] for b in apt["buildings"]]
-            folium.PolyLine(
-                locations=route,
-                color=color,
-                weight=2,
-                opacity=0.6,
-                popup=f"{apt_name} MAT 경로",
-            ).add_to(m_total)
+            route_pts = [apt["entrance"]] + [[b["lat"], b["lon"]] for b in apt["buildings"]]
+            # MAT 샘플 경로(토큰 있을 시 실제 경로로 대체 가능)
+            if MAPBOX_TOKEN:
+                coords = mapbox_route(route_pts, profile="driving")
+            else:
+                coords = route_pts
+            if coords:
+                folium.PolyLine(locations=coords, color=color, weight=2, opacity=0.6, popup=f"{apt_name} 경로").add_to(m_total)
 
     # 간단한 범례
     legend_html = (
@@ -354,9 +362,8 @@ with sim_tab:
 
     st_folium(m_total, use_container_width=True, height=480)
 
-    st.divider()
+    st.markdown("---")
     st.markdown("#### 📈 실시간 서비스 현황")
-
     a, b, c, d, e = st.columns(5)
     with a:
         st.metric("활성 사용자", "1,247명", "+156")
@@ -372,7 +379,7 @@ with sim_tab:
 # ──────────────────────────────────────────────────────────────────────────────
 # Footer
 # ──────────────────────────────────────────────────────────────────────────────
-st.divider()
+st.markdown("---")
 st.markdown(
     f"""
     #### 📋 연구 정보
