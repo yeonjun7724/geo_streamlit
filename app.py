@@ -20,7 +20,7 @@ st.set_page_config(
 # ──────────────────────────────────────────────────────────────────────────────
 # Secrets / Tokens
 # ──────────────────────────────────────────────────────────────────────────────
-MAPBOX_TOKEN = pk.eyJ1Ijoia2lteWVvbmp1biIsImEiOiJjbWRiZWw2NTEwNndtMmtzNHhocmNiMHllIn0.r7R2ConWouvP-Bmsppuvzw
+MAPBOX_TOKEN = "pk.eyJ1Ijoia2lteWVvbmp1biIsImEiOiJjbWRiZWw2NTEwNndtMmtzNHhocmNiMHllIn0.r7R2ConWouvP-Bmsppuvzw"
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN", os.getenv("MAPBOX_TOKEN", ""))
 if not MAPBOX_TOKEN:
     st.warning("Mapbox 토큰(MAPBOX_TOKEN)이 설정되지 않았습니다. 사이드바의 안내를 참고해 주세요.")
@@ -389,3 +389,4 @@ st.markdown(
     - **업데이트**: {datetime.now().strftime('%Y-%m-%d')} 기준
     """
 )
+
