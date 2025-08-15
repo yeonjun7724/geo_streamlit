@@ -9,7 +9,7 @@ from folium.plugins import AntPath
 # ── 페이지 기본 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="하남시 MAT 기반 아파트 네비게이션", page_icon="🏢", layout="wide")
 
-# ── 전역 스타일 (깔끔 정렬, 카드X) ───────────────────────────────────────────────
+# ── 전역 스타일 (카드X, 정렬/크기 조정) ──────────────────────────────────────────
 st.markdown("""
 <style>
 :root { --muted:#6B7280; --text:#111827; }
@@ -17,11 +17,11 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.6rem !important; }
 
-/* 전체 레이아웃 */
+/* 전체 레이아웃: 화면 가득 */
 .block-container {
-    max-width: 1600px;
-    padding-left: 1.5rem;
-    padding-right: 1.5rem;
+    max-width: 100%;
+    padding-left: 2rem;
+    padding-right: 2rem;
     margin: 0 auto;
 }
 
@@ -34,15 +34,29 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 /* 섹션 간 여백 */
 .section { margin: 1.8rem 0; }
 
+/* 셀렉트박스 가로폭 100% 채우기 */
+.stSelectbox, .stSelectbox > div { width: 100% !important; }
+.stSelectbox div[role="combobox"] { width: 100% !important; }
+
 /* KPI 중앙 정렬 */
 [data-testid="stMetric"] { text-align: center; }
 [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
 [data-testid="stMetricValue"]  { color: var(--text) !important; }
 
-/* 지도 제목 왼쪽 정렬 */
+/* '총 개선' 커스텀 KPI (단위만 빨간색) */
+.metric-wrap { text-align:center; }
+.metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+.metric-wrap .unit-red { color: #dc2626; margin-left: 2px; } /* red-600 */
+.metric-wrap .delta {
+    display:inline-block; margin-top: 6px; padding: 2px 8px; font-size: 0.85rem;
+    background: #e7f5ef; color: #0f7b4b; border-radius: 999px;
+}
+
+/* 지도 섹션 제목 왼쪽 정렬 */
 h4 { text-align: left; margin-bottom: 0.6rem; }
 
-/* 지도 attribution 및 스케일바 숨김 */
+/* 지도 attribution/스케일바 숨김 */
 .leaflet-control-attribution { display: none; }
 .leaflet-control-scale { display: none !important; }
 
@@ -96,7 +110,7 @@ def mapbox_route(points_latlon, profile="driving"):
     except Exception:
         return [], None, None, None
 
-# ── CARTO 타일 적용 ─────────────────────────────────────────────────────────────
+# ── CARTO 타일 ──────────────────────────────────────────────────────────────────
 def add_carto_tile(m: folium.Map, theme="positron"):
     if theme == "dark_matter":
         folium.TileLayer(tiles="CartoDB Dark_Matter", control=False).add_to(m)
@@ -121,14 +135,12 @@ def add_legend(m: folium.Map):
 # ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 MAT 기반 아파트 네비게이션</div>', unsafe_allow_html=True)
 
-# ── 컨트롤 ─────────────────────────────────────────────────────────────────────
-c1, c2, c3 = st.columns([1, 1, 1])
+# ── 컨트롤: 두 칼럼 모두 화면폭 50%씩 꽉 채우기 ──────────────────────────────────
+c1, c2 = st.columns([1, 1])
 with c1:
     origin_name = st.selectbox("출발지", list(ORIGINS.keys()), index=0)
 with c2:
     apartment_name = st.selectbox("아파트 단지", list(APARTMENTS.keys()), index=0)
-with c3:
-    st.write("")
 
 # ── 경로 계산 ───────────────────────────────────────────────────────────────────
 origin = ORIGINS[origin_name]
@@ -144,17 +156,30 @@ improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
 # ── KPI ────────────────────────────────────────────────────────────────────────
-k1, k2, k3, k4 = st.columns([1, 1, 1, 1])
+k1, k2, k3, k4 = st.columns(4)
 k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
 k2.metric("AS-IS 도보", f"{(walk1_min or 0):.2f}분")
 k3.metric("TO-BE 차량", f"{(drv2_min or 0):.2f}분")
-k4.metric("총 개선", f"{improvement_min:.2f}분", f"{improvement_pct:.1f}%")
+
+# '총 개선'은 단위 '분'만 빨간색으로 커스텀 표시
+impr_min_txt = f"{(improvement_min):.2f}"
+impr_pct_txt = f"{(improvement_pct):.1f}%"
+k4.markdown(
+    f"""
+    <div class="metric-wrap">
+      <div class="label">총 개선</div>
+      <div class="value">{impr_min_txt}<span class="unit-red">분</span></div>
+      <div class="delta">+ {impr_pct_txt}</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
-# ── 지도(스케일바 제거) ────────────────────────────────────────────────────────
+# ── 지도(2분할, CARTO, AntPath, 스케일바/단위 숨김) ─────────────────────────────
 map_height = 640
-left, right = st.columns([1, 1])
+left, right = st.columns(2)
 
 with left:
     st.markdown("#### 🚗 AS-IS — 정문까지 차량 + 잔여 도보")
@@ -195,7 +220,7 @@ st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 # ── 골든타임·생존 인원 분석 ────────────────────────────────────────────────────
 st.markdown("### 🚑 골든타임 영향 및 생존 인원 추정")
-colA, colB, colC = st.columns([1, 1, 1])
+colA, colB, colC = st.columns(3)
 with colA:
     golden_time = st.number_input("골든타임 기준(분)", min_value=1.0, max_value=15.0, value=4.0, step=0.5)
 with colB:
@@ -210,6 +235,6 @@ saved_people = int(annual_cases * survival_increase_rate)
 st.markdown(
     f"개선된 경로로 평균 이동 시간이 **{improvement_min:.2f}분** 단축되었다. "
     f"골든타임 **{golden_time:.1f}분** 대비 단축 비율은 **{(time_ratio*100):.1f}%**이다. "
-    f"1분 단축당 생존율 개선을 **{survival_gain_per_min*100:.1f}%p**로 보았을 때, "
+    f"1분 단축당 생존율 개선을 **{survival_increase_rate*100:.1f}%p**로 보았을 때, "
     f"연간 출동 **{annual_cases:,}건** 기준으로 추가 생존 가능 인원은 약 **{saved_people:,}명**으로 추정된다."
 )
