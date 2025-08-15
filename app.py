@@ -16,20 +16,22 @@ st.markdown("""
 html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.5rem !important; }
+/* 제목 크게 + 중앙 */
 .app-title {
-    font-size: 2.2rem; font-weight: 900; letter-spacing: -0.01em;
-    margin: 0 0 0.75rem 0; text-align: center;
+    font-size: 2.8rem; font-weight: 900; letter-spacing: -0.01em;
+    margin: 0 0 1rem 0; text-align: center;
 }
 .app-sub {
-    color: var(--muted); font-size: 1.05rem; margin-bottom: 2rem;
+    color: var(--muted); font-size: 1.05rem; margin-bottom: 2.5rem;
     text-align: center;
 }
-/* 전체 가운데 정렬 */
+/* 화면 꽉차게 */
 .block-container {
-    max-width: 1400px;
-    margin: auto;
+    max-width: 100%;
+    padding-left: 2rem;
+    padding-right: 2rem;
 }
-/* 콘텐츠 여백 */
+/* 콘텐츠 섹션 여백 */
 .section { margin-bottom: 2.5rem; }
 .leaflet-control-attribution { display: none; }
 </style>
@@ -119,7 +121,7 @@ k4.metric("총 개선", f"{improvement_min:.2f}분", f"{improvement_pct:.1f}%")
 
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 
-# ── 지도(2분할, 높이 800px) ─────────────────────────────────────────────────────
+# ── 지도(2분할, 높이 650px) ─────────────────────────────────────────────────────
 left, right = st.columns(2)
 
 with left:
@@ -133,7 +135,7 @@ with left:
         folium.PolyLine(drv1_coords, color="#1f77b4", weight=4, opacity=0.9).add_to(m1)
     if walk1_coords:
         folium.PolyLine(walk1_coords, color="#2ca02c", weight=4, opacity=0.9, dash_array="6,8").add_to(m1)
-    st_folium(m1, use_container_width=True, height=800)
+    st_folium(m1, use_container_width=True, height=650)
 
 with right:
     st.markdown("#### ✅ TO-BE — 아파트 앞까지 차량")
@@ -143,7 +145,7 @@ with right:
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
     if drv2_coords:
         folium.PolyLine(drv2_coords, color="#9467bd", weight=5, opacity=0.95).add_to(m2)
-    st_folium(m2, use_container_width=True, height=800)
+    st_folium(m2, use_container_width=True, height=650)
 
 st.markdown('<div class="section"></div>', unsafe_allow_html=True)
 
