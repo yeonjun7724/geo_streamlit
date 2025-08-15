@@ -1,4 +1,6 @@
 import os
+import math
+import random
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
@@ -12,7 +14,7 @@ st.set_page_config(page_title="하남시 벡터 중축 변환(MAT) 기반 아파
 # ── 전역 스타일 (카드X, 정렬/크기 조정) ──────────────────────────────────────────
 st.markdown("""
 <style>
-:root { --muted:#6B7280; --text:#111827; }
+:root { --muted:#6B7280; --text:#111827; --blue:#1d4ed8; --blue-weak:#e6efff; }
 html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.6rem !important; }
@@ -41,15 +43,16 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 /* KPI 중앙 정렬 */
 [data-testid="stMetric"] { text-align: center; }
 [data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
-[data-testid="stMetricValue"]  { color: var(--text) !important; }
+/* KPI 값 파란색으로 통일 */
+[data-testid="stMetricValue"]  { color: var(--blue) !important; }
 
-/* 커스텀 KPI */
+/* 커스텀 KPI ("총 개선") */
 .metric-wrap { text-align:center; }
 .metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+.metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--blue); }
 .metric-wrap .delta {
     display:inline-block; margin-top: 6px; padding: 2px 8px; font-size: 0.85rem;
-    background: #e7f5ef; color: #0f7b4b; border-radius: 999px;
+    background: var(--blue-weak); color: var(--blue); border-radius: 999px;
 }
 
 /* 지도 섹션 제목 왼쪽 정렬 */
@@ -100,6 +103,25 @@ APARTMENTS = {
     },
 }
 
+# ── 유틸: m → deg 오프셋, 근접 포인트 생성 ──────────────────────────────────────
+def meter_offset_to_deg(lat, dx_m, dy_m):
+    dlat = dy_m / 111000.0
+    dlon = dx_m / (111000.0 * max(math.cos(math.radians(lat)), 1e-6))
+    return dlat, dlon
+
+def make_nearby_points(center_latlon, n=5, radius_m=80, seed=42):
+    random.seed(seed)
+    lat0, lon0 = center_latlon
+    pts = []
+    for _ in range(n):
+        r = radius_m * math.sqrt(random.random())
+        theta = random.random() * 2 * math.pi
+        dx = r * math.cos(theta)
+        dy = r * math.sin(theta)
+        dlat, dlon = meter_offset_to_deg(lat0, dx, dy)
+        pts.append([lat0 + dlat, lon0 + dlon])
+    return pts
+
 # ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
@@ -132,19 +154,63 @@ def add_carto_tile(m: folium.Map, theme="positron"):
         folium.TileLayer(tiles="CartoDB Positron", control=False).add_to(m)
     return m
 
+# ── 범례(원 아이콘) ────────────────────────────────────────────────────────────
 def add_legend(m: folium.Map):
     legend_html = """
     <div style="
-        position: fixed; bottom: 28px; left: 28px; width: 190px;
+        position: fixed; bottom: 28px; left: 28px; width: 210px;
         background: rgba(255,255,255,0.95); z-index:9999; font-size:14px;
         border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px;">
       <div style="font-weight:700; margin-bottom:6px;">경로 범례</div>
-      <div><span style="color:#1f77b4;">━</span> AS-IS 차량</div>
-      <div><span style="color:#2ca02c;">━</span> AS-IS 도보</div>
-      <div><span style="color:#9467bd;">━</span> TO-BE 차량</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#1f77b4;"></span>
+        <span>AS-IS 차량</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#2ca02c;"></span>
+        <span>AS-IS 도보</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#9467bd;"></span>
+        <span>TO-BE 차량</span>
+      </div>
     </div>
     """
     m.get_root().html.add_child(folium.Element(legend_html))
+
+# ── 보조: 소화전/소방차전용구역/POI 표시 ───────────────────────────────────────
+def add_safety_and_pois(m: folium.Map, center_latlon, seed=123):
+    lat0, lon0 = center_latlon
+
+    # 소화전 3개
+    hydrants = make_nearby_points(center_latlon, n=3, radius_m=60, seed=seed)
+    for i, (lat, lon) in enumerate(hydrants, 1):
+        folium.Marker(
+            [lat, lon],
+            tooltip=f"소화전 #{i}",
+            icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")
+        ).add_to(m)
+
+    # 소방차 전용구역 2개
+    fire_lanes = make_nearby_points(center_latlon, n=2, radius_m=70, seed=seed+99)
+    for i, (lat, lon) in enumerate(fire_lanes, 1):
+        folium.Marker(
+            [lat, lon],
+            tooltip=f"소방차 전용구역 #{i}",
+            icon=folium.Icon(color="orange", icon="truck", prefix="fa")
+        ).add_to(m)
+
+    # 임의 POI 6개 (회색 원)
+    pois = make_nearby_points(center_latlon, n=6, radius_m=90, seed=seed+777)
+    for i, (lat, lon) in enumerate(pois, 1):
+        folium.CircleMarker(
+            [lat, lon],
+            radius=5,
+            color="#6B7280",
+            fill=True,
+            fill_opacity=0.9,
+            tooltip=f"임의 POI #{i}"
+        ).add_to(m)
 
 # ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 벡터 중축 변환(MAT) 기반 아파트 경로안내 서비스</div>', unsafe_allow_html=True)
@@ -175,14 +241,14 @@ k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
 k2.metric("AS-IS 도보", f"{(walk1_min or 0):.2f}분")
 k3.metric("TO-BE 차량", f"{(drv2_min or 0):.2f}분")
 
-# '총 개선' 값 전체를 빨간색으로 표시
+# '총 개선' 파란색으로 표시
 impr_min_txt = f"{(improvement_min):.2f}분"
 impr_pct_txt = f"{(improvement_pct):.1f}%"
 k4.markdown(
     f"""
     <div class="metric-wrap">
       <div class="label">총 개선</div>
-      <div class="value" style="color:#dc2626;">{impr_min_txt}</div>
+      <div class="value">{impr_min_txt}</div>
       <div class="delta">+ {impr_pct_txt}</div>
     </div>
     """,
@@ -206,6 +272,8 @@ with left:
         AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
     if walk1_coords:
         AntPath(walk1_coords, color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
+    # 안전시설 및 POI 추가
+    add_safety_and_pois(m1, center_hint, seed=100)
     add_legend(m1)
     st_folium(m1, use_container_width=True, height=map_height)
 
@@ -217,6 +285,8 @@ with right:
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
     if drv2_coords:
         AntPath(drv2_coords, color="#9467bd", weight=6, opacity=0.95, delay=800).add_to(m2)
+    # 안전시설 및 POI 추가
+    add_safety_and_pois(m2, center_hint, seed=200)
     add_legend(m2)
     st_folium(m2, use_container_width=True, height=map_height)
 
@@ -239,17 +309,6 @@ saved_people = int(annual_cases * survival_increase_rate)
 st.markdown(
     f"개선된 경로로 평균 이동 시간이 **{improvement_min:.2f}분** 단축되었다. "
     f"골든타임 **{golden_time:.1f}분** 대비 단축 비율은 **{(time_ratio*100):.1f}%**이다. "
-    f"1분 단축당 생존율 개선을 **{survival_increase_rate*100:.1f}%p**로 보았을 때, "
+    f"1분 단축당 생존율 개선을 **{survival_gain_per_min*100:.1f}%p**로 보았을 때, "
     f"연간 출동 **{annual_cases:,}건** 기준으로 추가 생존 가능 인원은 약 **{saved_people:,}명**으로 추정된다."
 )
-
-
-
-
-
-
-
-
-
-
-
