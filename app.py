@@ -9,15 +9,28 @@ from datetime import datetime
 # ── 페이지 기본 설정 ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="하남시 MAT 기반 아파트 네비게이션", page_icon="🏢", layout="wide")
 
-# ── 최소 스타일: 전역 톤만 유지(카드형 관련 스타일 전부 제거) ─────────────────────
+# ── 전역 스타일 ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 :root { --muted:#6b7280; --text:#111827; }
 html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.5rem !important; }
-.app-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 0.25rem 0; }
-.app-sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 0.75rem; }
+.app-title {
+    font-size: 2.2rem; font-weight: 900; letter-spacing: -0.01em;
+    margin: 0 0 0.75rem 0; text-align: center;
+}
+.app-sub {
+    color: var(--muted); font-size: 1.05rem; margin-bottom: 2rem;
+    text-align: center;
+}
+/* 전체 가운데 정렬 */
+.block-container {
+    max-width: 1400px;
+    margin: auto;
+}
+/* 콘텐츠 여백 */
+.section { margin-bottom: 2.5rem; }
 .leaflet-control-attribution { display: none; }
 </style>
 """, unsafe_allow_html=True)
@@ -25,7 +38,7 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 # ── Mapbox 설정 ──────────────────────────────────────────────────────────────────
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 
-# ── 샘플 데이터(그대로) ──────────────────────────────────────────────────────────
+# ── 데이터 ──────────────────────────────────────────────────────────────────────
 ORIGINS = {
     "하남소방서": [37.539826, 127.220661],
     "미사강변119안전센터": [37.566902, 127.185298],
@@ -43,7 +56,7 @@ APARTMENTS = {
     },
 }
 
-# ── 라우팅 함수(기능 코드 변경 없음) ───────────────────────────────────────────────
+# ── 라우팅 함수 ──────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
     if not MAPBOX_TOKEN:
@@ -74,21 +87,21 @@ def add_mapbox_tile(m: folium.Map, style="mapbox/streets-v12"):
     folium.TileLayer(tiles=tile_url, attr="Mapbox", name="Mapbox", control=False).add_to(m)
     return m
 
-# ── 헤더 ────────────────────────────────────────────────────────────────────────
+# ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 MAT 기반 아파트 네비게이션</div>', unsafe_allow_html=True)
 st.markdown('<div class="app-sub">출발지와 단지를 선택하면 AS-IS/TO-BE 경로와 소요시간을 비교합니다.</div>', unsafe_allow_html=True)
 
-# ── 상단 컨트롤 & KPI(레이아웃만 유지, 카드 제거) ─────────────────────────────────
-c1, c2, c3 = st.columns([2, 2, 1])
-origin_name = c1.selectbox("출발지", list(ORIGINS.keys()), index=0)
-apartment_name = c2.selectbox("아파트 단지", list(APARTMENTS.keys()), index=0)
-c3.button("경로 갱신", use_container_width=True)
+# ── 컨트롤 섹션 ──────────────────────────────────────────────────────────────────
+with st.container():
+    c1, c2 = st.columns([1, 1])
+    origin_name = c1.selectbox("출발지", list(ORIGINS.keys()), index=0)
+    apartment_name = c2.selectbox("아파트 단지", list(APARTMENTS.keys()), index=0)
 
+# ── 경로 계산 ────────────────────────────────────────────────────────────────────
 origin = ORIGINS[origin_name]
 apt = APARTMENTS[apartment_name]
 apt_gate, apt_front, center_hint = apt["gate"], apt["front"], apt["center"]
 
-# ── 경로 계산(기능 코드 변경 없음) ────────────────────────────────────────────────
 drv1_coords, drv1_km, drv1_min, _ = mapbox_route([origin, apt_gate], profile="driving")
 walk1_coords, walk1_km, walk1_min, _ = mapbox_route([apt_gate, apt_front], profile="walking")
 drv2_coords, drv2_km, drv2_min, _ = mapbox_route([origin, apt_front], profile="driving")
@@ -97,13 +110,16 @@ asis_total = (drv1_min or 0) + (walk1_min or 0)
 improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
+# ── KPI ─────────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("AS-IS 차량", f"{(drv1_min or 0):.2f}분")
 k2.metric("AS-IS 도보", f"{(walk1_min or 0):.2f}분")
 k3.metric("TO-BE 차량", f"{(drv2_min or 0):.2f}분")
 k4.metric("총 개선", f"{improvement_min:.2f}분", f"{improvement_pct:.1f}%")
 
-# ── 지도 섹션(2분할, 지도 높이 600px로 확대, 카드 제거) ───────────────────────────
+st.markdown('<div class="section"></div>', unsafe_allow_html=True)
+
+# ── 지도(2분할, 높이 800px) ─────────────────────────────────────────────────────
 left, right = st.columns(2)
 
 with left:
@@ -117,7 +133,7 @@ with left:
         folium.PolyLine(drv1_coords, color="#1f77b4", weight=4, opacity=0.9).add_to(m1)
     if walk1_coords:
         folium.PolyLine(walk1_coords, color="#2ca02c", weight=4, opacity=0.9, dash_array="6,8").add_to(m1)
-    st_folium(m1, use_container_width=True, height=600)
+    st_folium(m1, use_container_width=True, height=800)
 
 with right:
     st.markdown("#### ✅ TO-BE — 아파트 앞까지 차량")
@@ -127,9 +143,11 @@ with right:
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
     if drv2_coords:
         folium.PolyLine(drv2_coords, color="#9467bd", weight=5, opacity=0.95).add_to(m2)
-    st_folium(m2, use_container_width=True, height=600)
+    st_folium(m2, use_container_width=True, height=800)
 
-# ── 결과 표(기본 표만 사용, 카드 제거) ────────────────────────────────────────────
+st.markdown('<div class="section"></div>', unsafe_allow_html=True)
+
+# ── 결과 표 ─────────────────────────────────────────────────────────────────────
 result_df = pd.DataFrame([
     {"구분": "AS-IS 차량", "거리(km)": round(drv1_km or 0, 2), "시간(분)": round(drv1_min or 0, 2)},
     {"구분": "AS-IS 도보", "거리(km)": round(walk1_km or 0, 2), "시간(분)": round(walk1_min or 0, 2)},
