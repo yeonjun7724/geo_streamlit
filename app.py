@@ -13,7 +13,14 @@ st.set_page_config(page_title="하남시 벡터 중축 변환(MAT) 기반 아파
 st.markdown("""
 <style>
 :root { --muted:#6B7280; --text:#111827; --blue:#1d4ed8; --blue-weak:#e6efff; }
-html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; }
+
+/* 전역 폰트 크기 확대 */
+html, body, [data-testid="stAppViewContainer"] {
+    color: var(--text) !important;
+    font-size: 1.05rem !important;   /* 기본 텍스트 크기 확대 */
+    line-height: 1.55 !important;    /* 줄 간격 넉넉하게 */
+}
+
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.6rem !important; }
 
@@ -27,45 +34,46 @@ html, body, [data-testid="stAppViewContainer"] { color: var(--text) !important; 
 
 /* 큰 제목 */
 .app-title {
-    font-size: 3.2rem; font-weight: 900; letter-spacing: -0.02em;
-    margin: 0.2rem 0 0.8rem 0; text-align: center;
+    font-size: 3.6rem;   /* 제목 폰트 키움 */
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    margin: 0.4rem 0 1.2rem 0;
+    text-align: center;
 }
 
 /* 섹션 간 여백 */
-.section { margin: 1.8rem 0; }
+.section { margin: 2rem 0; }
 
-/* 셀렉트박스 가로폭 100% */
-.stSelectbox, .stSelectbox > div { width: 100% !important; }
-.stSelectbox div[role="combobox"] { width: 100% !important; }
+/* 셀렉트박스 */
+.stSelectbox, .stSelectbox > div { width: 100% !important; font-size: 1.1rem !important; }
 
-/* KPI 기본: 블랙 */
-[data-testid="stMetric"] { text-align: center; }
-[data-testid="stMetricLabel"] { color: var(--muted) !important; font-weight: 600; }
-[data-testid="stMetricValue"]  { color: var(--text) !important; }
+/* KPI 기본 */
+.metric-plain .label { color: var(--muted); font-weight: 600; margin-bottom: 6px; font-size: 1.1rem; }
+.metric-plain .value { font-size: 2.4rem; font-weight: 700; line-height: 1.2; color: var(--text); }
 
-/* 커스텀 KPI (블랙) : AS-IS 차량, AS-IS 도보, TO-BE 차량 공통 */
-.metric-plain { text-align:center; }
-.metric-plain .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.metric-plain .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--text); }
-
-/* 커스텀 KPI (파랑) : 총 개선 */
-.metric-wrap { text-align:center; }
-.metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.metric-wrap .value { font-size: 2rem; font-weight: 700; line-height: 1.1; color: var(--blue); }
+/* KPI 파랑 강조 */
+.metric-wrap .label { color: var(--muted); font-weight: 600; margin-bottom: 6px; font-size: 1.1rem; }
+.metric-wrap .value { font-size: 2.4rem; font-weight: 800; line-height: 1.2; color: var(--blue); }
 .metric-wrap .delta {
-    display:inline-block; margin-top: 6px; padding: 2px 8px; font-size: 0.85rem;
+    display:inline-block; margin-top: 8px; padding: 3px 10px; font-size: 1rem;
     background: var(--blue-weak); color: var(--blue); border-radius: 999px;
 }
 
 /* 지도 섹션 제목 */
-h4 { text-align: left; margin-bottom: 0.6rem; }
+h4 { text-align: left; margin-bottom: 0.8rem; font-size: 1.3rem; font-weight: 700; }
+
+/* 본문 설명 */
+p, li, .stMarkdown { font-size: 1.1rem !important; }
+
+/* 참고문헌 */
+small { font-size: 0.95rem; }
 
 /* 지도 attribution/스케일바 숨김 */
 .leaflet-control-attribution { display: none; }
 .leaflet-control-scale { display: none !important; }
 
 /* 구분선 */
-.divider { height: 1px; background: #e5e7eb; margin: 1.4rem 0; }
+.divider { height: 1px; background: #e5e7eb; margin: 1.6rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -374,3 +382,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
