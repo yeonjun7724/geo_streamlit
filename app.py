@@ -72,27 +72,25 @@ h4 { text-align: left; margin-bottom: 0.6rem; }
 # ── Mapbox 토큰 ─────────────────────────────────────────────────────────────────
 MAPBOX_TOKEN = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
 
-if not MAPBOX_TOKEN:
-    st.warning("⚠️ Mapbox Token이 비어 있습니다. st.secrets['MAPBOX_TOKEN'] 또는 환경변수를 설정하세요. (폴백 라우팅(OSRM)으로 시도합니다)")
-
 # ── 데이터 (출발지 + 아파트 + 경로 인근 하드코딩 안전시설) ──────────────────────
 ORIGINS = {
     "하남소방서": [37.539826, 127.220661],
     "미사강변119안전센터": [37.566902, 127.185298],
 }
 
+# 각 단지: gate↔front(도보 경로)와 front 인근에 30m 내외로 배치한 좌표들
 APARTMENTS = {
     "미사강변센트럴풍경채": {
         "center": [37.556591, 127.183081],
         "gate":   [37.556844, 127.181887],
         "front":  [37.557088, 127.183036],
-        "hydrants": [
+        "hydrants": [  # 소화전(3~4)
             [37.55695, 127.18220],
             [37.55702, 127.18255],
             [37.55706, 127.18285],
             [37.55710, 127.18305],
         ],
-        "fire_lanes": [
+        "fire_lanes": [  # 소방차 전용구역(3)
             [37.55712, 127.18302],
             [37.55692, 127.18298],
             [37.55698, 127.18322],
@@ -164,83 +162,29 @@ APARTMENTS = {
     },
 }
 
-# ── 라우팅 함수 (Mapbox → 실패 시 OSRM 폴백) ─────────────────────────────────────
-def _latlon_to_lonlat_str(points_latlon):
-    # 입력: [[lat, lon], [lat, lon]] → "lon,lat;lon,lat"
-    return ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
-
-def _coords_geojson_to_latlon(line_lonlat):
-    # GeoJSON coordinates: [[lon,lat], ...] → [[lat,lon], ...]
-    return [[lat, lon] for lon, lat in line_lonlat]
-
+# ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
     if not MAPBOX_TOKEN:
-        return None  # 토큰 없으면 폴백 유도
-    coords = _latlon_to_lonlat_str(points_latlon)
+        return [], None, None, None
+    coords = ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
     url = f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}"
-    params = {
-        "geometries": "geojson",
-        "overview": "full",
-        "steps": "false",
-        "alternatives": "false",
-        "access_token": MAPBOX_TOKEN,
-    }
+    params = {"geometries": "geojson", "overview": "full", "access_token": MAPBOX_TOKEN}
     try:
-        r = requests.get(url, params=params, timeout=12)
-        status = r.status_code
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
         data = r.json()
-        if status != 200:
-            msg = data.get("message", "unknown error")
-            st.error(f"Mapbox Directions 오류 ({status}): {msg}")
-            # 디버깅 힌트(토큰 일부만 표시)
-            masked = (MAPBOX_TOKEN[:6] + "..." + MAPBOX_TOKEN[-4:]) if MAPBOX_TOKEN else "(empty)"
-            st.caption(f"요청 URL: {url.split('access_token=')[0]}access_token={masked}")
-            return None
-        routes = data.get("routes", [])
-        if not routes:
-            st.warning("Mapbox: 경로가 반환되지 않았습니다(routes=[]). 도로 접근 불가/좌표 문제 가능.")
-            return None
-        route = routes[0]
-        coords_latlon = _coords_geojson_to_latlon(route["geometry"]["coordinates"])
-        distance_km = route.get("distance", 0) / 1000.0
-        duration_min = route.get("duration", 0) / 60.0
-        end_latlon = coords_latlon[-1] if coords_latlon else None
-        return {"coords": coords_latlon, "km": distance_km, "min": duration_min, "end": end_latlon}
-    except Exception as e:
-        st.error(f"Mapbox 요청 예외: {e}")
-        return None
-
-@st.cache_data(show_spinner=False, ttl=300)
-def osrm_route(points_latlon, profile="driving"):
-    # OSRM demo server (무료, 가끔 느리거나 제한적일 수 있음)
-    base = "https://router.project-osrm.org/route/v1"
-    coords = _latlon_to_lonlat_str(points_latlon).replace(";", ";")
-    url = f"{base}/{profile}/{coords}"
-    params = {"overview": "full", "geometries": "geojson"}
-    try:
-        r = requests.get(url, params=params, timeout=12)
-        data = r.json()
-        if data.get("code") != "Ok":
-            st.error(f"OSRM 오류: {data.get('message', data.get('code'))}")
-            return None
+        if not data.get("routes"):
+            return [], None, None, None
         route = data["routes"][0]
-        coords_latlon = _coords_geojson_to_latlon(route["geometry"]["coordinates"])
+        line = route["geometry"]["coordinates"]
+        coords_latlon = [[lat, lon] for lon, lat in line]
+        end_latlon = coords_latlon[-1] if coords_latlon else None
         distance_km = route.get("distance", 0) / 1000.0
         duration_min = route.get("duration", 0) / 60.0
-        end_latlon = coords_latlon[-1] if coords_latlon else None
-        return {"coords": coords_latlon, "km": distance_km, "min": duration_min, "end": end_latlon}
-    except Exception as e:
-        st.error(f"OSRM 요청 예외: {e}")
-        return None
-
-def best_route(points_latlon, profile):
-    # 1) Mapbox 시도 → 2) 실패 시 OSRM 폴백
-    r = mapbox_route(points_latlon, profile=profile)
-    if r is None:
-        st.info("ℹ️ Mapbox 경로 계산이 실패하여 OSRM으로 폴백합니다.")
-        r = osrm_route(points_latlon, profile=profile if profile != "walking" else "foot")  # OSRM 보행: foot
-    return r or {"coords": [], "km": None, "min": None, "end": None}
+        return coords_latlon, distance_km, duration_min, end_latlon
+    except Exception:
+        return [], None, None, None
 
 # ── CARTO 타일 ──────────────────────────────────────────────────────────────────
 def add_carto_tile(m: folium.Map, theme="positron"):
@@ -276,12 +220,20 @@ def add_legend(m: folium.Map):
 
 # ── 안전시설 표시 (하드코딩 좌표 사용) ──────────────────────────────────────────
 def add_fixed_safety(m: folium.Map, apt_info: dict):
+    # 소화전
     for i, (lat, lon) in enumerate(apt_info.get("hydrants", []), 1):
-        folium.Marker([lat, lon], tooltip=f"소화전 #{i}",
-                      icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")).add_to(m)
+        folium.Marker(
+            [lat, lon],
+            tooltip=f"소화전 #{i}",
+            icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")
+        ).add_to(m)
+    # 소방차 전용구역
     for i, (lat, lon) in enumerate(apt_info.get("fire_lanes", []), 1):
-        folium.Marker([lat, lon], tooltip=f"소방차 전용구역 #{i}",
-                      icon=folium.Icon(color="orange", icon="truck", prefix="fa")).add_to(m)
+        folium.Marker(
+            [lat, lon],
+            tooltip=f"소방차 전용구역 #{i}",
+            icon=folium.Icon(color="orange", icon="truck", prefix="fa")
+        ).add_to(m)
 
 # ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 벡터 중축 변환(MAT) 기반 아파트 경로 안내 서비스</div>', unsafe_allow_html=True)
@@ -298,24 +250,59 @@ origin = ORIGINS[origin_name]
 apt = APARTMENTS[apartment_name]
 apt_gate, apt_front, center_hint = apt["gate"], apt["front"], apt["center"]
 
-drv1 = best_route([origin, apt_gate], profile="driving")
-walk1 = best_route([apt_gate, apt_front], profile="walking")
-drv2 = best_route([origin, apt_front], profile="driving")
+drv1_coords, drv1_km, drv1_min, _ = mapbox_route([origin, apt_gate], profile="driving")
+walk1_coords, walk1_km, walk1_min, _ = mapbox_route([apt_gate, apt_front], profile="walking")
+drv2_coords, drv2_km, drv2_min, _ = mapbox_route([origin, apt_front], profile="driving")
 
-drv1_min = drv1["min"] or 0
-walk1_min = walk1["min"] or 0
-drv2_min = drv2["min"] or 0
-
-asis_total = drv1_min + walk1_min
-improvement_min = asis_total - drv2_min
+asis_total = (drv1_min or 0) + (walk1_min or 0)
+improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
 # ── KPI: 세 개 모두 커스텀(블랙), "총 개선"만 파랑 ────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
-k1.markdown(f"<div class='metric-plain'><div class='label'>AS-IS 차량</div><div class='value'>{drv1_min:.2f}분</div></div>", unsafe_allow_html=True)
-k2.markdown(f"<div class='metric-plain'><div class='label'>AS-IS 도보</div><div class='value'>{walk1_min:.2f}분</div></div>", unsafe_allow_html=True)
-k3.markdown(f"<div class='metric-plain'><div class='label'>TO-BE 차량</div><div class='value'>{drv2_min:.2f}분</div></div>", unsafe_allow_html=True)
-k4.markdown(f"<div class='metric-wrap'><div class='label'>총 개선</div><div class='value'>{improvement_min:.2f}분</div><div class='delta'>+ {improvement_pct:.1f}%</div></div>", unsafe_allow_html=True)
+
+k1.markdown(
+    f"""
+    <div class="metric-plain">
+      <div class="label">AS-IS 차량</div>
+      <div class="value">{(drv1_min or 0):.2f}분</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+k2.markdown(
+    f"""
+    <div class="metric-plain">
+      <div class="label">AS-IS 도보</div>
+      <div class="value">{(walk1_min or 0):.2f}분</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+k3.markdown(
+    f"""
+    <div class="metric-plain">
+      <div class="label">TO-BE 차량</div>
+      <div class="value">{(drv2_min or 0):.2f}분</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+impr_min_txt = f"{(improvement_min):.2f}분"
+impr_pct_txt = f"{(improvement_pct):.1f}%"
+k4.markdown(
+    f"""
+    <div class="metric-wrap">
+      <div class="label">총 개선</div>
+      <div class="value">{impr_min_txt}</div>
+      <div class="delta">+ {impr_pct_txt}</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
@@ -330,11 +317,11 @@ with left:
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m1)
     folium.Marker(apt_gate, popup="정문", icon=folium.Icon(color="red", icon="flag")).add_to(m1)
     folium.Marker(apt_front, popup="아파트 동 앞", icon=folium.Icon(color="green", icon="home")).add_to(m1)
-    if drv1["coords"]:
-        AntPath(drv1["coords"], color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
-    if walk1["coords"]:
-        AntPath(walk1["coords"], color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
-    add_fixed_safety(m1, apt)
+    if drv1_coords:
+        AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
+    if walk1_coords:
+        AntPath(walk1_coords, color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
+    add_fixed_safety(m1, apt)   # 경로 인근으로 하드코딩해둔 좌표
     add_legend(m1)
     st_folium(m1, use_container_width=True, height=map_height)
 
@@ -344,8 +331,8 @@ with right:
     add_carto_tile(m2, theme="positron")
     folium.Marker(origin, popup="출발지", icon=folium.Icon(color="gray", icon="car")).add_to(m2)
     folium.Marker(apt_front, popup="아파트 앞", icon=folium.Icon(color="green", icon="home")).add_to(m2)
-    if drv2["coords"]:
-        AntPath(drv2["coords"], color="#9467bd", weight=6, opacity=0.95, delay=800).add_to(m2)
+    if drv2_coords:
+        AntPath(drv2_coords, color="#9467bd", weight=6, opacity=0.95, delay=800).add_to(m2)
     add_fixed_safety(m2, apt)
     add_legend(m2)
     st_folium(m2, use_container_width=True, height=map_height)
@@ -375,7 +362,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 레퍼런스
+# 레퍼런스 추가
 st.markdown(
     """
     <small style='color:gray'>
