@@ -17,10 +17,9 @@ st.markdown("""
 /* 전역 폰트 크기 확대 */
 html, body, [data-testid="stAppViewContainer"] {
     color: var(--text) !important;
-    font-size: 1.05rem !important;   /* 기본 텍스트 크기 확대 */
-    line-height: 1.55 !important;    /* 줄 간격 넉넉하게 */
+    font-size: 1.05rem !important;
+    line-height: 1.55 !important;
 }
-
 [data-testid="stHeader"] { background: transparent !important; }
 .main > div { padding-top: 0.6rem !important; }
 
@@ -34,7 +33,7 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* 큰 제목 */
 .app-title {
-    font-size: 3.6rem;   /* 제목 폰트 키움 */
+    font-size: 3.6rem;
     font-weight: 900;
     letter-spacing: -0.02em;
     margin: 0.4rem 0 1.2rem 0;
@@ -86,19 +85,18 @@ ORIGINS = {
     "미사강변119안전센터": [37.566902, 127.185298],
 }
 
-# 각 단지: gate↔front(도보 경로)와 front 인근에 30m 내외로 배치한 좌표들
 APARTMENTS = {
     "미사강변센트럴풍경채": {
         "center": [37.556591, 127.183081],
         "gate":   [37.556844, 127.181887],
         "front":  [37.557088, 127.183036],
-        "hydrants": [  # 소화전(3~4)
+        "hydrants": [
             [37.55695, 127.18220],
             [37.55702, 127.18255],
             [37.55706, 127.18285],
             [37.55710, 127.18305],
         ],
-        "fire_lanes": [  # 소방차 전용구역(3)
+        "fire_lanes": [
             [37.55712, 127.18302],
             [37.55692, 127.18298],
             [37.55698, 127.18322],
@@ -170,29 +168,56 @@ APARTMENTS = {
     },
 }
 
-# ── 라우팅 함수 ─────────────────────────────────────────────────────────────────
+# ── 라우팅 함수 (디버그 메타 포함) ──────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=300)
 def mapbox_route(points_latlon, profile="driving"):
-    if not MAPBOX_TOKEN:
-        return [], None, None, None
-    coords = ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
-    url = f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}"
-    params = {"geometries": "geojson", "overview": "full", "access_token": MAPBOX_TOKEN}
+    """
+    Returns: (coords_latlon, distance_km, duration_min, end_latlon, meta)
+    meta: {"ok": bool, "status": int|None, "url": str, "msg": str}
+    """
+    meta = {"ok": False, "status": None, "url": "", "msg": ""}
+    token = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
+    if not token:
+        meta["msg"] = "MAPBOX_TOKEN이 비어 있습니다 (secrets.toml 또는 환경변수 확인)."
+        return [], None, None, None, meta
     try:
-        r = requests.get(url, params=params, timeout=10)
+        coords = ";".join([f"{lon},{lat}" for lat, lon in points_latlon])
+        url = f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}"
+        params = {"geometries": "geojson", "overview": "full", "access_token": token}
+        meta["url"] = url
+        r = requests.get(url, params=params, timeout=12)
+        meta["status"] = r.status_code
         r.raise_for_status()
         data = r.json()
         if not data.get("routes"):
-            return [], None, None, None
+            meta["msg"] = data.get("message") or "routes가 비어 있습니다."
+            return [], None, None, None, meta
         route = data["routes"][0]
         line = route["geometry"]["coordinates"]
         coords_latlon = [[lat, lon] for lon, lat in line]
         end_latlon = coords_latlon[-1] if coords_latlon else None
-        distance_km = route.get("distance", 0) / 1000.0
-        duration_min = route.get("duration", 0) / 60.0
-        return coords_latlon, distance_km, duration_min, end_latlon
-    except Exception:
-        return [], None, None, None
+        distance_km = (route.get("distance") or 0) / 1000.0
+        duration_min = (route.get("duration") or 0) / 60.0
+        meta["ok"] = True
+        return coords_latlon, distance_km, duration_min, end_latlon, meta
+    except requests.exceptions.HTTPError as e:
+        try:
+            meta["msg"] = r.json().get("message") or str(e)
+        except Exception:
+            meta["msg"] = str(e)
+        return [], None, None, None, meta
+    except Exception as e:
+        meta["msg"] = f"요청 실패: {e}"
+        return [], None, None, None, meta
+
+def try_walk_with_offsets(a, b, offsets=(0.0, 0.00012, -0.00012)):
+    for dlat in offsets:
+        for dlon in offsets:
+            cand = [b[0] + dlat, b[1] + dlon]
+            coords, km, mn, _, meta = mapbox_route([a, cand], profile="walking")
+            if meta.get("ok") and coords:
+                return coords, km, mn, meta
+    return [], None, None, {"ok": False, "msg": "모든 오프셋 재시도 실패"}
 
 # ── CARTO 타일 ──────────────────────────────────────────────────────────────────
 def add_carto_tile(m: folium.Map, theme="positron"):
@@ -228,20 +253,12 @@ def add_legend(m: folium.Map):
 
 # ── 안전시설 표시 (하드코딩 좌표 사용) ──────────────────────────────────────────
 def add_fixed_safety(m: folium.Map, apt_info: dict):
-    # 소화전
     for i, (lat, lon) in enumerate(apt_info.get("hydrants", []), 1):
-        folium.Marker(
-            [lat, lon],
-            tooltip=f"소화전 #{i}",
-            icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")
-        ).add_to(m)
-    # 소방차 전용구역
+        folium.Marker([lat, lon], tooltip=f"소화전 #{i}",
+                      icon=folium.Icon(color="red", icon="fire-extinguisher", prefix="fa")).add_to(m)
     for i, (lat, lon) in enumerate(apt_info.get("fire_lanes", []), 1):
-        folium.Marker(
-            [lat, lon],
-            tooltip=f"소방차 전용구역 #{i}",
-            icon=folium.Icon(color="orange", icon="truck", prefix="fa")
-        ).add_to(m)
+        folium.Marker([lat, lon], tooltip=f"소방차 전용구역 #{i}",
+                      icon=folium.Icon(color="orange", icon="truck", prefix="fa")).add_to(m)
 
 # ── 제목 ───────────────────────────────────────────────────────────────────────
 st.markdown('<div class="app-title">🏢 하남시 벡터 중축 변환(MAT) 기반 아파트 경로 안내 서비스</div>', unsafe_allow_html=True)
@@ -258,59 +275,59 @@ origin = ORIGINS[origin_name]
 apt = APARTMENTS[apartment_name]
 apt_gate, apt_front, center_hint = apt["gate"], apt["front"], apt["center"]
 
-drv1_coords, drv1_km, drv1_min, _ = mapbox_route([origin, apt_gate], profile="driving")
-walk1_coords, walk1_km, walk1_min, _ = mapbox_route([apt_gate, apt_front], profile="walking")
-drv2_coords, drv2_km, drv2_min, _ = mapbox_route([origin, apt_front], profile="driving")
+drv1_coords, drv1_km, drv1_min, _, meta_drv1 = mapbox_route([origin, apt_gate], profile="driving")
+walk1_coords, walk1_km, walk1_min, _, meta_walk1 = mapbox_route([apt_gate, apt_front], profile="walking")
+drv2_coords, drv2_km, drv2_min, _, meta_drv2 = mapbox_route([origin, apt_front], profile="driving")
+
+# 보행 실패 시 소폭 오프셋 재시도
+if not walk1_coords:
+    walk1_coords, walk1_km, walk1_min, meta_walk1 = try_walk_with_offsets(apt_gate, apt_front)
+
+# 표시만이라도 되게 직선 폴백
+def straight(a, b):
+    return [a, b] if a and b else []
+
+if not drv1_coords: drv1_coords = straight(origin, apt_gate)
+if not walk1_coords: walk1_coords = straight(apt_gate, apt_front)
+if not drv2_coords: drv2_coords = straight(origin, apt_front)
 
 asis_total = (drv1_min or 0) + (walk1_min or 0)
 improvement_min = asis_total - (drv2_min or 0)
 improvement_pct = (improvement_min / asis_total * 100) if asis_total > 0 else 0
 
-# ── KPI: 세 개 모두 커스텀(블랙), "총 개선"만 파랑 ────────────────────────────
+# ── 디버그 패널 ────────────────────────────────────────────────────────────────
+with st.expander("🔎 경로 디버그 보기"):
+    token = st.secrets.get("MAPBOX_TOKEN") or os.getenv("MAPBOX_TOKEN", "")
+    st.write("토큰 로드:", "✅ 있음" if token else "❌ 없음", f"({token[:6]}•••)" if token else "")
+    st.write("driving(AS-IS 차량):", meta_drv1)
+    st.write("walking(AS-IS 도보):", meta_walk1)
+    st.write("driving(TO-BE 차량):", meta_drv2)
+    if any(m.get("msg") for m in (meta_drv1, meta_walk1, meta_drv2)):
+        st.info("메시지에 'No route', 'Not Authorized', 'Profile disabled' 등이 보이면 토큰/스코프/좌표 문제일 수 있습니다.")
+
+# ── KPI ────────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4 = st.columns(4)
-
-k1.markdown(
-    f"""
-    <div class="metric-plain">
-      <div class="label">AS-IS 차량</div>
-      <div class="value">{(drv1_min or 0):.2f}분</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-k2.markdown(
-    f"""
-    <div class="metric-plain">
-      <div class="label">AS-IS 도보</div>
-      <div class="value">{(walk1_min or 0):.2f}분</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-k3.markdown(
-    f"""
-    <div class="metric-plain">
-      <div class="label">TO-BE 차량</div>
-      <div class="value">{(drv2_min or 0):.2f}분</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-impr_min_txt = f"{(improvement_min):.2f}분"
-impr_pct_txt = f"{(improvement_pct):.1f}%"
-k4.markdown(
-    f"""
-    <div class="metric-wrap">
-      <div class="label">총 개선</div>
-      <div class="value">{impr_min_txt}</div>
-      <div class="delta">+ {impr_pct_txt}</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+k1.markdown(f"""
+<div class="metric-plain">
+  <div class="label">AS-IS 차량</div>
+  <div class="value">{(drv1_min or 0):.2f}분</div>
+</div>""", unsafe_allow_html=True)
+k2.markdown(f"""
+<div class="metric-plain">
+  <div class="label">AS-IS 도보</div>
+  <div class="value">{(walk1_min or 0):.2f}분</div>
+</div>""", unsafe_allow_html=True)
+k3.markdown(f"""
+<div class="metric-plain">
+  <div class="label">TO-BE 차량</div>
+  <div class="value">{(drv2_min or 0):.2f}분</div>
+</div>""", unsafe_allow_html=True)
+k4.markdown(f"""
+<div class="metric-wrap">
+  <div class="label">총 개선</div>
+  <div class="value">{(improvement_min):.2f}분</div>
+  <div class="delta">+ {(improvement_pct):.1f}%</div>
+</div>""", unsafe_allow_html=True)
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
@@ -329,7 +346,7 @@ with left:
         AntPath(drv1_coords, color="#1f77b4", weight=5, opacity=0.9, delay=800).add_to(m1)
     if walk1_coords:
         AntPath(walk1_coords, color="#2ca02c", weight=5, opacity=0.9, dash_array=[6, 8], delay=900).add_to(m1)
-    add_fixed_safety(m1, apt)   # 경로 인근으로 하드코딩해둔 좌표
+    add_fixed_safety(m1, apt)
     add_legend(m1)
     st_folium(m1, use_container_width=True, height=map_height)
 
@@ -370,7 +387,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 레퍼런스 추가
+# 레퍼런스
 st.markdown(
     """
     <small style='color:gray'>
